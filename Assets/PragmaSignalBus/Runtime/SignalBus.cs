@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Import.PragmaSignalBus
+namespace Pragma.SignalBus
 {
     public class SignalBus : ISignalBus
     {

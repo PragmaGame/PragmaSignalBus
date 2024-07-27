@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace Import.PragmaSignalBus
+namespace Pragma.SignalBus
 {
     public class Subscription
     {

@@ -1,6 +1,6 @@
 using System;
 using System.Diagnostics;
-using Import.PragmaSignalBus;
+using Pragma.SignalBus;
 using NUnit.Framework;
 using UnityEngine.Profiling;
 using UnityEngine.TestTools.Constraints;

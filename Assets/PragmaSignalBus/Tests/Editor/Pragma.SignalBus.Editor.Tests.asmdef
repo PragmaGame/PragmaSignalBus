@@ -1,5 +1,5 @@
 {
-    "name": "Pragma.SignalBus.Tests",
+    "name": "Pragma.SignalBus.Editor.Tests",
     "rootNamespace": "",
     "references": [
         "UnityEngine.TestRunner",
