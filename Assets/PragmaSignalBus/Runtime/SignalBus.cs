@@ -11,45 +11,88 @@ namespace Pragma.SignalBus
 
         private List<Subscription> _subscriptionsToRegister;
         private List<Subscription> _subscriptionsToDeregister;
-
-        private bool _isAlreadyInvoked;
-        private Type _currentInvokedType;
+        
+        private bool _isAlreadySend;
+        private Type _currentSendType;
         private bool _isDirtySubscriptions;
 
-        public SignalBus()
+        private List<ISignalBus> _childrenToAdded;
+        private List<ISignalBus> _childrenToRemoved;
+
+        private bool _isAlreadyBroadcast;
+        private bool _isDirtyChildren;
+        
+        protected Configuration configuration;
+
+        public SignalBus(Configuration configuration = null)
         {
+            this.configuration = configuration ?? new Configuration();
+            
             _subscriptions = new Dictionary<Type, List<Subscription>>();
+            
+            _subscriptionsToDeregister = new List<Subscription>();
+            _subscriptionsToRegister = new List<Subscription>();
 
             _children = new List<ISignalBus>();
 
-            _subscriptionsToDeregister = new List<Subscription>();
-            _subscriptionsToRegister = new List<Subscription>();
+            _childrenToAdded = new List<ISignalBus>();
+            _childrenToRemoved = new List<ISignalBus>();
         }
 
-        private bool IsAlreadyInvoked(Type type) => _isAlreadyInvoked && _currentInvokedType == type;
+        private bool IsAlreadySend(Type type) => _isAlreadySend && _currentSendType == type;
         
         public void AddChildren(ISignalBus signalBus)
         {
-            _children.Add(signalBus);
+            if (_isAlreadyBroadcast)
+            {
+                _childrenToAdded.Add(signalBus);
+                _isDirtyChildren = true;
+            }
+            else
+            {
+                _children.Add(signalBus);
+            }
         }
 
         public void RemoveChildren(ISignalBus signalBus)
         {
-            _children.Remove(signalBus);
+            if (_isAlreadyBroadcast)
+            {
+                _childrenToRemoved.Add(signalBus);
+                _isDirtyChildren = true;
+            }
+            else
+            {
+                _children.Remove(signalBus);
+            }
+        }
+        
+        public object Register<TSignal>(Action<TSignal> action, int order = int.MaxValue) where TSignal : class
+        {
+            var token = GetDefaultToken();
+            Register(action, token, order);
+            return token;
+        }
+        
+        public object Register<TSignal>(Action action, int order = int.MaxValue) where TSignal : class
+        {
+            var token = GetDefaultToken();
+            Register<TSignal>(action, token, order);
+            return token;
         }
 
-        public void Register<TSignal>(Action<TSignal> action, int order = int.MaxValue, object extraToken = null) where TSignal : class
+        public void Register<TSignal>(Action<TSignal> action, object token, int order = int.MaxValue) where TSignal : class
         {
             Action<object> wrapperAction = args => action((TSignal)args);
             
-            Register(typeof(TSignal), wrapperAction, action, order, extraToken);
+            Register(typeof(TSignal), wrapperAction, action, order, token);
         }
         
-        public void Register<TSignal>(Action action, int order = int.MaxValue, object extraToken = null) where TSignal : class
+        public void Register<TSignal>(Action action, object token, int order = int.MaxValue) where TSignal : class
         {
             Action<object> wrapperAction = _ => action();
             
-            Register(typeof(TSignal), wrapperAction, action, order, extraToken);
+            Register(typeof(TSignal), wrapperAction, action, order, token);
         }
 
         private void Register(Type signalType, Action<object> action, object token, int order = int.MaxValue, object extraToken = null)
@@ -58,7 +101,7 @@ namespace Pragma.SignalBus
 
             if (_subscriptions.TryGetValue(signalType, out var subscriptions))
             {
-                if (IsAlreadyInvoked(signalType))
+                if (IsAlreadySend(signalType))
                 {
                     _subscriptionsToRegister.Add(subscription);
                     _isDirtySubscriptions = true;
@@ -74,7 +117,7 @@ namespace Pragma.SignalBus
             }
         }
 
-        private void InsertSubscription(List<Subscription> subscriptions, Subscription subscription)
+        protected virtual void InsertSubscription(List<Subscription> subscriptions, Subscription subscription)
         {
             if (subscription.order == int.MaxValue)
             {
@@ -110,6 +153,7 @@ namespace Pragma.SignalBus
         {
             if (!_subscriptions.ContainsKey(signalType))
             {
+                TryThrowException($"Dont find EventTyp. Signal Type : {signalType}");
                 return;
             }
 
@@ -119,10 +163,11 @@ namespace Pragma.SignalBus
 
             if (subscriptionToRemove == -1)
             {
+                TryThrowException($"Dont find Subscription. Signal Type : {signalType}");
                 return;
             }
 
-            if (IsAlreadyInvoked(signalType))
+            if (IsAlreadySend(signalType))
             {
                 _subscriptionsToDeregister.Add(subscriptions[subscriptionToRemove]);
                 _isDirtySubscriptions = true;
@@ -133,11 +178,50 @@ namespace Pragma.SignalBus
             }
         }
 
-        public void DeregisterByExtraToken(object extraToken)
+        public void Deregister(object token)
         {
-            foreach (var subscriptions in _subscriptions.Values)
+            var hashToken = token.GetHashCode();
+            var removeCount = 0;
+            
+            if (_isAlreadySend)
             {
-                subscriptions.RemoveAll(subscription => subscription.extraToken == extraToken);
+                foreach (var key in _subscriptions.Keys)
+                {
+                    var subscriptions = _subscriptions[key];
+                    var isCurrentPublish = key == _currentSendType;
+
+                    for (var i = 0; i < subscriptions.Count; i++)
+                    {
+                        if (subscriptions[i].extraToken.GetHashCode() != hashToken)
+                        {
+                            continue;
+                        }
+
+                        removeCount++;
+                        
+                        if (isCurrentPublish)
+                        {
+                            _subscriptionsToDeregister.Add(subscriptions[i]);
+                            _isDirtySubscriptions = true;
+                        }
+                        else
+                        {
+                            subscriptions.RemoveAt(i);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                foreach (var subscriptions in _subscriptions.Values)
+                {
+                    removeCount += subscriptions.RemoveAll(subscription => subscription.extraToken.GetHashCode() == hashToken);
+                }
+            }
+
+            if (removeCount == 0)
+            {
+                TryThrowException($"Dont find Subscription. Token : {token}");
             }
         }
         
@@ -146,59 +230,71 @@ namespace Pragma.SignalBus
             _subscriptions.Clear();
         }
 
-        public void Invoke<TSignal>(TSignal signal) where TSignal : class
+        public void Send<TSignal>(TSignal signal) where TSignal : class
         {
-            Invoke(typeof(TSignal), signal);
+            Send(typeof(TSignal), signal);
         }
 
-        public void Invoke<TSignal>() where TSignal : class
+        public void Send<TSignal>() where TSignal : class
         {
-            Invoke(typeof(TSignal),null);
+            Send(typeof(TSignal),null);
         }
 
-        public TSignal InvokeWithCreateInstance<TSignal>() where TSignal : class
+        public TSignal SendWithCreateInstance<TSignal>() where TSignal : class
         {
             var instance = Activator.CreateInstance<TSignal>();
             
-            Invoke(typeof(TSignal), instance);
+            Send(typeof(TSignal), instance);
 
             return instance;
         }
         
-        public void InvokeWithBroadcast<TSignal>(TSignal signal) where TSignal : class
+        public void SendWithBroadcast<TSignal>(TSignal signal) where TSignal : class
         {
-            InvokeWithBroadcast(typeof(TSignal), signal);
+            SendWithBroadcast(typeof(TSignal), signal);
         }
         
-        public void InvokeWithBroadcast<TSignal>() where TSignal : class
+        public void SendWithBroadcast<TSignal>() where TSignal : class
         {
-            InvokeWithBroadcast(typeof(TSignal), null);
+            SendWithBroadcast(typeof(TSignal), null);
         }
         
-        public void InvokeWithBroadcast(Type signalType, object signal)
+        public void SendWithBroadcast(Type signalType, object signal)
         {
-            Invoke(signalType, signal);
+            Send(signalType, signal);
             
             Broadcast(signalType, signal);
         }
 
         private void Broadcast(Type signalType, object signal)
         {
+            _isAlreadyBroadcast = true;
+            
             foreach (var signalBus in _children)
             {
-                signalBus.InvokeWithBroadcast(signalType, signal);
+                signalBus.SendWithBroadcast(signalType, signal);
+            }
+
+            _isAlreadyBroadcast = false;
+
+            if (_isDirtyChildren)
+            {
+                RefreshChildren();
+                
+                _isDirtyChildren = false;
             }
         }
         
-        private void Invoke(Type signalType, object signal)
+        private void Send(Type signalType, object signal)
         {
             if (!_subscriptions.TryGetValue(signalType, out var subscriptions))
             {
+                TryThrowException($"Dont find Subscription. Signal Type : {signalType}");
                 return;
             }
 
-            _isAlreadyInvoked = true;
-            _currentInvokedType = signalType;
+            _isAlreadySend = true;
+            _currentSendType = signalType;
             
             var cachedCount = subscriptions.Count;
 
@@ -207,7 +303,7 @@ namespace Pragma.SignalBus
                 subscriptions[i].action.Invoke(signal);
             }
             
-            _isAlreadyInvoked = false;
+            _isAlreadySend = false;
 
             if (_isDirtySubscriptions)
             {
@@ -219,7 +315,7 @@ namespace Pragma.SignalBus
 
         private void RefreshSubscriptions()
         {
-            var subscriptions = _subscriptions[_currentInvokedType];
+            var subscriptions = _subscriptions[_currentSendType];
 
             foreach (var subscription in _subscriptionsToDeregister)
             {
@@ -234,6 +330,36 @@ namespace Pragma.SignalBus
             }
             
             _subscriptionsToRegister.Clear();
+        }
+        
+        private void RefreshChildren()
+        {
+            foreach (var signalBus in _childrenToRemoved)
+            {
+                _children.Remove(signalBus);
+            }
+            
+            _childrenToRemoved.Clear();
+
+            foreach (var signalBus in _childrenToAdded)
+            {
+                _children.Add(signalBus);
+            }
+            
+            _childrenToAdded.Clear();
+        }
+        
+        protected virtual void TryThrowException(string message)
+        {
+            if (configuration.IsThrowException)
+            {
+                throw new Exception(message);
+            }
+        }
+
+        protected virtual object GetDefaultToken()
+        {
+            return Guid.NewGuid();
         }
     }
 }

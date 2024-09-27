@@ -27,9 +27,9 @@ namespace UnitTests
             _methodHandlerHit = true;
         }
 
-        private void TestMethodHandlerThrowException(Signal signal)
+        private void TestMethodHandlerFail(Signal signal)
         {
-            throw new Exception("This should not be executed due to unsubscribing.");
+            Assert.Fail();
         }
         
         private class Signal
@@ -49,7 +49,7 @@ namespace UnitTests
             var eventBus = new SignalBus();
             eventBus.Register<Signal>(TestMethodHandler);
             
-            eventBus.Invoke(new Signal{Name = "Signal", Identifier = 1});
+            eventBus.Send(new Signal{Name = "Signal", Identifier = 1});
             Assert.IsTrue(_methodHandlerHit);
         }
         
@@ -66,7 +66,7 @@ namespace UnitTests
                 _methodHandlerHit = true;
             });
             
-            eventBus.Invoke(new Signal {Name = "Signal 2", Identifier = 2});
+            eventBus.Send(new Signal {Name = "Signal 2", Identifier = 2});
             Assert.IsTrue(_methodHandlerHit);
         }
         
@@ -75,10 +75,10 @@ namespace UnitTests
         {
             var eventBus = new SignalBus();
 
-            eventBus.Register<Signal>(TestMethodHandlerThrowException);
-            eventBus.Deregister<Signal>(TestMethodHandlerThrowException);
+            eventBus.Register<Signal>(TestMethodHandlerFail);
+            eventBus.Deregister<Signal>(TestMethodHandlerFail);
 
-            eventBus.Invoke(new Signal());
+            eventBus.Send(new Signal());
         }
         
         [Test]
@@ -86,13 +86,13 @@ namespace UnitTests
         {
             var eventBus = new SignalBus();
 
-            eventBus.Register<Signal>(TestMethodHandlerThrowException);
-            eventBus.Deregister<Signal>(TestMethodHandlerThrowException);
-            eventBus.Deregister<Signal>(TestMethodHandlerThrowException);
-            eventBus.Deregister<Signal>(TestMethodHandlerThrowException);
-            eventBus.Deregister<Signal>(TestMethodHandlerThrowException);
+            eventBus.Register<Signal>(TestMethodHandlerFail);
+            eventBus.Deregister<Signal>(TestMethodHandlerFail);
+            eventBus.Deregister<Signal>(TestMethodHandlerFail);
+            eventBus.Deregister<Signal>(TestMethodHandlerFail);
+            eventBus.Deregister<Signal>(TestMethodHandlerFail);
 
-            eventBus.Invoke(new Signal());
+            eventBus.Send(new Signal());
         }
         
         [Test]
@@ -100,12 +100,12 @@ namespace UnitTests
         {
             var eventBus = new SignalBus();
 
-            eventBus.Register<Signal>(TestMethodHandlerThrowException);
-            eventBus.Deregister<Signal>(TestMethodHandlerThrowException);
-            eventBus.Register<Signal>(TestMethodHandlerThrowException);
-            eventBus.Deregister<Signal>(TestMethodHandlerThrowException);
+            eventBus.Register<Signal>(TestMethodHandlerFail);
+            eventBus.Deregister<Signal>(TestMethodHandlerFail);
+            eventBus.Register<Signal>(TestMethodHandlerFail);
+            eventBus.Deregister<Signal>(TestMethodHandlerFail);
 
-            eventBus.Invoke(new Signal());
+            eventBus.Send(new Signal());
         }
         
         [Test]
@@ -121,7 +121,7 @@ namespace UnitTests
             eventBus.Register<SignalRegister>(TestDeregisterInMethodHandlerCounter);
             eventBus.Register<SignalRegister>(TestDeregisterInMethodHandlerCounter);
 
-            eventBus.Invoke(new SignalRegister {signalBus = eventBus});
+            eventBus.Send(new SignalRegister {signalBus = eventBus});
 
             Assert.AreEqual(5, _countMethodInvoked);
         }
@@ -158,7 +158,7 @@ namespace UnitTests
             
             for (int i = 0; i < 1000000; i++)
             {
-                eventBus.Invoke(signal);
+                eventBus.Send(signal);
             }
 
             sw.Stop();
@@ -187,7 +187,7 @@ namespace UnitTests
             
             for (int i = 0; i < 1000000; i++)
             {
-                eventBus.Invoke(new Signal { Name = "Signal", Identifier = 1 });
+                eventBus.Send(new Signal { Name = "Signal", Identifier = 1 });
             }
             
             sw.Stop();
