@@ -1,6 +1,4 @@
-﻿using System;
-
-namespace Pragma.SignalBus
+﻿namespace Pragma.SignalBus
 {
     public interface ISignalBus : ISignalRegistrar, ISignalSender
     {

@@ -240,39 +240,30 @@ namespace Pragma.SignalBus
             Send(typeof(TSignal),null);
         }
 
-        public TSignal SendWithCreateInstance<TSignal>() where TSignal : class
+        public void Broadcast<TSignal>(TSignal signal) where TSignal : class
         {
-            var instance = Activator.CreateInstance<TSignal>();
-            
-            Send(typeof(TSignal), instance);
-
-            return instance;
+            Broadcast(typeof(TSignal), signal);
         }
         
-        public void SendWithBroadcast<TSignal>(TSignal signal) where TSignal : class
+        public void Broadcast<TSignal>() where TSignal : class
         {
-            SendWithBroadcast(typeof(TSignal), signal);
+            Broadcast(typeof(TSignal), null);
         }
         
-        public void SendWithBroadcast<TSignal>() where TSignal : class
-        {
-            SendWithBroadcast(typeof(TSignal), null);
-        }
-        
-        public void SendWithBroadcast(Type signalType, object signal)
+        public void Broadcast(Type signalType, object signal)
         {
             Send(signalType, signal);
             
-            Broadcast(signalType, signal);
+            BroadcastInternal(signalType, signal);
         }
 
-        private void Broadcast(Type signalType, object signal)
+        private void BroadcastInternal(Type signalType, object signal)
         {
             _isAlreadyBroadcast = true;
             
             foreach (var signalBus in _children)
             {
-                signalBus.SendWithBroadcast(signalType, signal);
+                signalBus.Broadcast(signalType, signal);
             }
 
             _isAlreadyBroadcast = false;
@@ -285,7 +276,7 @@ namespace Pragma.SignalBus
             }
         }
         
-        private void Send(Type signalType, object signal)
+        public void Send(Type signalType, object signal)
         {
             if (!_subscriptions.TryGetValue(signalType, out var subscriptions))
             {
