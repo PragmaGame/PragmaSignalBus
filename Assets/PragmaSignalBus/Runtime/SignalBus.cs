@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Pragma.SignalBus
 {
@@ -7,97 +8,88 @@ namespace Pragma.SignalBus
     {
         private readonly Dictionary<Type, List<Subscription>> _subscriptions;
 
-        private List<ISignalBus> _children; 
-
         private List<Subscription> _subscriptionsToRegister;
         private List<Subscription> _subscriptionsToDeregister;
-        
+        private HashSet<Type> _subscriptionsToSort;
+
         private bool _isAlreadySend;
         private Type _currentSendType;
         private bool _isDirtySubscriptions;
 
-        private List<ISignalBus> _childrenToAdded;
-        private List<ISignalBus> _childrenToRemoved;
-
-        private bool _isAlreadyBroadcast;
-        private bool _isDirtyChildren;
-        
         protected Configuration configuration;
 
         public SignalBus(Configuration configuration = null)
         {
             this.configuration = configuration ?? new Configuration();
-            
+
             _subscriptions = new Dictionary<Type, List<Subscription>>();
-            
+
             _subscriptionsToDeregister = new List<Subscription>();
             _subscriptionsToRegister = new List<Subscription>();
-
-            _children = new List<ISignalBus>();
-
-            _childrenToAdded = new List<ISignalBus>();
-            _childrenToRemoved = new List<ISignalBus>();
+            _subscriptionsToSort = new HashSet<Type>();
         }
 
         private bool IsAlreadySend(Type type) => _isAlreadySend && _currentSendType == type;
-        
-        public void AddChildren(ISignalBus signalBus)
-        {
-            if (_isAlreadyBroadcast)
-            {
-                _childrenToAdded.Add(signalBus);
-                _isDirtyChildren = true;
-            }
-            else
-            {
-                _children.Add(signalBus);
-            }
-        }
 
-        public void RemoveChildren(ISignalBus signalBus)
-        {
-            if (_isAlreadyBroadcast)
-            {
-                _childrenToRemoved.Add(signalBus);
-                _isDirtyChildren = true;
-            }
-            else
-            {
-                _children.Remove(signalBus);
-            }
-        }
-        
-        public object Register<TSignal>(Action<TSignal> action, int order = int.MaxValue) where TSignal : class
+        public object Register<TSignal>(
+            Action<TSignal> action,
+            Type owner = null,
+            Type[] beforeOrder = null,
+            Type[] afterOrder = null,
+            bool isLazySorted = true) where TSignal : class
         {
             var token = GetDefaultToken();
-            Register(action, token, order);
-            return token;
-        }
-        
-        public object Register<TSignal>(Action action, int order = int.MaxValue) where TSignal : class
-        {
-            var token = GetDefaultToken();
-            Register<TSignal>(action, token, order);
+            Register(action, token, owner, beforeOrder, afterOrder, isLazySorted);
             return token;
         }
 
-        public void Register<TSignal>(Action<TSignal> action, object token, int order = int.MaxValue) where TSignal : class
+        public object Register<TSignal>(
+            Action action,
+            Type owner = null,
+            Type[] beforeOrder = null,
+            Type[] afterOrder = null,
+            bool isLazySorted = true) where TSignal : class
         {
-            Action<object> wrapperAction = args => action((TSignal)args);
-            
-            Register(typeof(TSignal), wrapperAction, action, order, token);
+            var token = GetDefaultToken();
+            Register<TSignal>(action, token, owner, beforeOrder, afterOrder, isLazySorted);
+            return token;
         }
-        
-        public void Register<TSignal>(Action action, object token, int order = int.MaxValue) where TSignal : class
+
+        public void Register<TSignal>(
+            Action action,
+            object token,
+            Type owner = null,
+            Type[] beforeOrder = null,
+            Type[] afterOrder = null,
+            bool isLazySorted = true) where TSignal : class
         {
             Action<object> wrapperAction = _ => action();
-            
-            Register(typeof(TSignal), wrapperAction, action, order, token);
+            Register(typeof(TSignal), wrapperAction, action, token, owner, beforeOrder, afterOrder, isLazySorted);
         }
 
-        private void Register(Type signalType, Action<object> action, object token, int order = int.MaxValue, object extraToken = null)
+        public void Register<TSignal>(
+            Action<TSignal> action,
+            object token,
+            Type owner = null,
+            Type[] beforeOrder = null,
+            Type[] afterOrder = null,
+            bool isLazySorted = true) where TSignal : class
         {
-            var subscription = new Subscription(action, token, order, extraToken);
+            Action<object> wrapperAction = args => action((TSignal)args);
+            Register(typeof(TSignal), wrapperAction, action, token, owner, beforeOrder, afterOrder, isLazySorted);
+        }
+
+        private void Register(
+            Type signalType,
+            Action<object> action,
+            object token,
+            object extraToken,
+            Type owner,
+            Type[] beforeOrder,
+            Type[] afterOrder,
+            bool isLazySorted = true)
+        {
+            var subscription = new Subscription(action, token, extraToken, owner, beforeOrder, afterOrder);
 
             if (_subscriptions.TryGetValue(signalType, out var subscriptions))
             {
@@ -108,53 +100,158 @@ namespace Pragma.SignalBus
                 }
                 else
                 {
-                    InsertSubscription(subscriptions, subscription);
+                    subscriptions.Add(subscription);
+
+                    if (owner == null)
+                    {
+                        return;
+                    }
+                    
+                    if (isLazySorted && !_subscriptionsToSort.Contains(signalType))
+                    {
+                        _subscriptionsToSort.Add(signalType);
+                    }
+                    else
+                    {
+                        SortSubscriptions(subscriptions);
+                    }
                 }
             }
             else
             {
-                _subscriptions.Add(signalType, new List<Subscription>() {subscription});
+                _subscriptions.Add(signalType, new List<Subscription>() { subscription });
             }
         }
 
-        protected virtual void InsertSubscription(List<Subscription> subscriptions, Subscription subscription)
+        private void SortSubscriptions(Type type)
         {
-            if (subscription.order == int.MaxValue)
-            {
-                subscriptions.Add(subscription);
-                return;
-            }
+            SortSubscriptions(_subscriptions[type]);
+        }
 
-            for (var i = 0; i < subscriptions.Count; i++)
+        private void SortSubscriptions()
+        {
+            foreach (var type in _subscriptionsToSort)
             {
-                if (subscriptions[i].order <= subscription.order)
-                {
-                    continue;
-                }
-                
-                subscriptions.Insert(i, subscription);
-                return;
+                SortSubscriptions(type);
             }
             
-            subscriptions.Add(subscription);
+            _subscriptionsToSort.Clear();
         }
 
-        public void Deregister<TSignal>(Action action) where TSignal : class
+        private void SortSubscriptions(List<Subscription> subscriptions)
         {
-            Deregister(typeof(TSignal), action);
+            if(subscriptions.All(s => s.owner == null))
+            {
+                return;
+            }
+
+            var sortedSubscriptions = new List<Subscription>();
+            var unsortedSubscriptions = new List<Subscription>();
+
+            foreach (var subscription in subscriptions)
+            {
+                if (subscription.owner == null)
+                {
+                    unsortedSubscriptions.Add(subscription);
+                }
+                else
+                {
+                    sortedSubscriptions.Add(subscription);
+                }
+            }
+
+            var dependencies = new Dictionary<Subscription, HashSet<Subscription>>();
+            var reverseDependencies = new Dictionary<Subscription, HashSet<Subscription>>();
+            
+            foreach (var sub in sortedSubscriptions)
+            {
+                dependencies[sub] = new HashSet<Subscription>();
+                reverseDependencies[sub] = new HashSet<Subscription>();
+            }
+            
+            foreach (var current in sortedSubscriptions)
+            {
+                if (current.afterOrder != null)
+                {
+                    foreach (var afterType in current.afterOrder)
+                    {
+                        if (afterType == null)
+                        {
+                            continue;
+                        }
+                        
+                        var predecessors = sortedSubscriptions
+                            .Where(s => s.owner == afterType && s != current);
+
+                        foreach (var pred in predecessors)
+                        {
+                            dependencies[current].Add(pred);
+                            reverseDependencies[pred].Add(current);
+                        }
+                    }
+                }
+                
+                if (current.beforeOrder != null)
+                {
+                    foreach (var beforeType in current.beforeOrder)
+                    {
+                        if (beforeType == null) continue;
+                        
+                        var successors = sortedSubscriptions
+                            .Where(s => s.owner == beforeType && s != current);
+
+                        foreach (var succ in successors)
+                        {
+                            dependencies[succ].Add(current);
+                            reverseDependencies[current].Add(succ);
+                        }
+                    }
+                }
+            }
+            
+            var queue = new Queue<Subscription>(sortedSubscriptions.Where(sub => dependencies[sub].Count == 0));
+            var sorted = new List<Subscription>();
+            
+            while (queue.Count > 0)
+            {
+                var current = queue.Dequeue();
+                sorted.Add(current);
+                
+                foreach (var dependent in reverseDependencies[current])
+                {
+                    dependencies[dependent].Remove(current);
+                    if (dependencies[dependent].Count == 0)
+                    {
+                        queue.Enqueue(dependent);
+                    }
+                }
+            }
+            
+            if (sorted.Count != sortedSubscriptions.Count)
+            {
+                throw new InvalidOperationException("Outer loop in dependent subscriptions. Cannot be ordered.");
+            }
+            
+            subscriptions.Clear();
+            subscriptions.AddRange(sorted);
+            subscriptions.AddRange(unsortedSubscriptions);
+        }
+
+        public bool Deregister<TSignal>(Action action) where TSignal : class
+        {
+            return Deregister(typeof(TSignal), action);
         }
         
-        public void Deregister<TSignal>(Action<TSignal> action) where TSignal : class
+        public bool Deregister<TSignal>(Action<TSignal> action) where TSignal : class
         {
-            Deregister(typeof(TSignal), action);
+            return Deregister(typeof(TSignal), action);
         }
 
-        private void Deregister(Type signalType, object token)
+        private bool Deregister(Type signalType, object token)
         {
             if (!_subscriptions.ContainsKey(signalType))
             {
-                TryThrowException($"Dont find EventTyp. Signal Type : {signalType}");
-                return;
+                return false;
             }
 
             var subscriptions = _subscriptions[signalType];
@@ -163,8 +260,7 @@ namespace Pragma.SignalBus
 
             if (subscriptionToRemove == -1)
             {
-                TryThrowException($"Dont find Subscription. Signal Type : {signalType}");
-                return;
+                return false;
             }
 
             if (IsAlreadySend(signalType))
@@ -176,9 +272,11 @@ namespace Pragma.SignalBus
             {
                 subscriptions.RemoveAt(subscriptionToRemove);
             }
+
+            return true;
         }
 
-        public void Deregister(object token)
+        public int Deregister(object token)
         {
             var hashToken = token.GetHashCode();
             var removeCount = 0;
@@ -219,10 +317,7 @@ namespace Pragma.SignalBus
                 }
             }
 
-            if (removeCount == 0)
-            {
-                TryThrowException($"Dont find Subscription. Token : {token}");
-            }
+            return removeCount;
         }
         
         public void ClearSubscriptions()
@@ -240,48 +335,17 @@ namespace Pragma.SignalBus
             Send(typeof(TSignal),null);
         }
 
-        public void Broadcast<TSignal>(TSignal signal) where TSignal : class
-        {
-            Broadcast(typeof(TSignal), signal);
-        }
-        
-        public void Broadcast<TSignal>() where TSignal : class
-        {
-            Broadcast(typeof(TSignal), null);
-        }
-        
-        public void Broadcast(Type signalType, object signal)
-        {
-            Send(signalType, signal);
-            
-            BroadcastInternal(signalType, signal);
-        }
-
-        private void BroadcastInternal(Type signalType, object signal)
-        {
-            _isAlreadyBroadcast = true;
-            
-            foreach (var signalBus in _children)
-            {
-                signalBus.Broadcast(signalType, signal);
-            }
-
-            _isAlreadyBroadcast = false;
-
-            if (_isDirtyChildren)
-            {
-                RefreshChildren();
-                
-                _isDirtyChildren = false;
-            }
-        }
-        
         public void Send(Type signalType, object signal)
         {
             if (!_subscriptions.TryGetValue(signalType, out var subscriptions))
             {
-                TryThrowException($"Dont find Subscription. Signal Type : {signalType}");
                 return;
+            }
+            
+            if(_subscriptionsToSort.Count > 0 && _subscriptionsToSort.Contains(signalType))
+            {
+                SortSubscriptions(subscriptions);
+                _subscriptionsToSort.Remove(signalType);
             }
 
             _isAlreadySend = true;
@@ -317,35 +381,11 @@ namespace Pragma.SignalBus
 
             foreach (var subscription in _subscriptionsToRegister)
             {
-                InsertSubscription(subscriptions, subscription);
+                subscriptions.Add(subscription);
             }
             
             _subscriptionsToRegister.Clear();
-        }
-        
-        private void RefreshChildren()
-        {
-            foreach (var signalBus in _childrenToRemoved)
-            {
-                _children.Remove(signalBus);
-            }
-            
-            _childrenToRemoved.Clear();
-
-            foreach (var signalBus in _childrenToAdded)
-            {
-                _children.Add(signalBus);
-            }
-            
-            _childrenToAdded.Clear();
-        }
-        
-        protected virtual void TryThrowException(string message)
-        {
-            if (configuration.IsThrowException)
-            {
-                throw new Exception(message);
-            }
+            SortSubscriptions(subscriptions);
         }
 
         protected virtual object GetDefaultToken()

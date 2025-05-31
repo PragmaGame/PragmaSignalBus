@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
+using System.Reflection;
 using Pragma.SignalBus;
 using NUnit.Framework;
 using UnityEngine.Profiling;
@@ -40,7 +43,7 @@ namespace UnitTests
         {
             public SignalBus signalBus;
         }
-        
+
         [Test]
         public void RegisterAndInvoke()
         {
@@ -247,6 +250,159 @@ namespace UnitTests
 
                 return allocs;
             }
+        }
+        
+        [Test]
+        public void OrderTest()
+        {
+            var eventBus = new SignalBus();
+            var callOrder = new List<int>();
+
+            // Подписчики с зависимостями
+            eventBus.Register<Signal>(() => callOrder.Add(1), owner: typeof(Handler1));
+            eventBus.Register<Signal>(() => callOrder.Add(2), owner: typeof(Handler2),
+                afterOrder: new[] { typeof(Handler1) });
+            eventBus.Register<Signal>(() => callOrder.Add(3), owner: typeof(Handler3),
+                beforeOrder: new[] { typeof(Handler2) });
+
+            eventBus.Send<Signal>();
+
+            CollectionAssert.AreEqual(new[] { 1, 3, 2 }, callOrder);
+        }
+
+        [Test]
+        public void LazySortingTest()
+        {
+            var eventBus = new SignalBus();
+            var callOrder = new List<int>();
+            
+            eventBus.Register<Signal>(() => callOrder.Add(1), owner: typeof(Handler1), isLazySorted: true);
+            eventBus.Register<Signal>(() => callOrder.Add(2), owner: typeof(Handler2),
+                afterOrder: new[] { typeof(Handler1) }, isLazySorted: true);
+            
+            Assert.IsTrue(GetSubscriptionsForTest<Signal>(eventBus).Any(s => s.owner == typeof(Handler2)));
+
+            eventBus.Send<Signal>();
+            CollectionAssert.AreEqual(new[] { 1, 2 }, callOrder);
+        }
+
+        [Test]
+        public void CyclicDependencyThrowsOnSendTest()
+        {
+            var eventBus = new SignalBus();
+            
+            eventBus.Register<Signal>(() => { }, 
+                owner: typeof(Handler1), 
+                beforeOrder: new[] { typeof(Handler2) },
+                isLazySorted: true);
+    
+            eventBus.Register<Signal>(() => { }, 
+                owner: typeof(Handler2), 
+                beforeOrder: new[] { typeof(Handler1) },
+                isLazySorted: true);
+            
+            Assert.Throws<InvalidOperationException>(() => eventBus.Send<Signal>());
+        }
+
+        [Test]
+        public void CyclicDependencyThrowsImmediatelyTest()
+        {
+            var eventBus = new SignalBus();
+    
+            eventBus.Register<Signal>(() => { }, 
+                owner: typeof(Handler1), 
+                beforeOrder: new[] { typeof(Handler2) });
+            
+            Assert.Throws<InvalidOperationException>(() => 
+            {
+                eventBus.Register<Signal>(() => { }, 
+                    owner: typeof(Handler2), 
+                    beforeOrder: new[] { typeof(Handler1) });
+            });
+        }
+        
+        [Test]
+        public void ComplexCyclicDependencyThrowsTest()
+        {
+            var eventBus = new SignalBus();
+    
+            eventBus.Register<Signal>(() => { }, 
+                owner: typeof(Handler1), 
+                beforeOrder: new[] { typeof(Handler3) },
+                isLazySorted: true);
+    
+            eventBus.Register<Signal>(() => { }, 
+                owner: typeof(Handler2), 
+                beforeOrder: new[] { typeof(Handler1) },
+                isLazySorted: true);
+    
+            eventBus.Register<Signal>(() => { }, 
+                owner: typeof(Handler3), 
+                beforeOrder: new[] { typeof(Handler2) },
+                isLazySorted: true);
+    
+            // Cycle: Handler1 → Handler3 → Handler2 → Handler1
+            Assert.Throws<InvalidOperationException>(() => eventBus.Send<Signal>());
+        }
+
+        [Test]
+        public void RegisterDuringSendTest()
+        {
+            var eventBus = new SignalBus();
+            var lateHandlerCalled = false;
+
+            eventBus.Register<Signal>(() => { eventBus.Register<Signal>(() => lateHandlerCalled = true); });
+
+            eventBus.Send<Signal>();
+            eventBus.Send<Signal>();
+
+            Assert.IsTrue(lateHandlerCalled);
+        }
+
+        [Test]
+        public void SendWithoutParametersTest()
+        {
+            var eventBus = new SignalBus();
+            var handlerCalled = false;
+
+            eventBus.Register<Signal>(() => handlerCalled = true);
+            eventBus.Send<Signal>();
+
+            Assert.IsTrue(handlerCalled);
+        }
+        
+        private class Handler1
+        {
+        }
+
+        private class Handler2
+        {
+        }
+
+        private class Handler3
+        {
+        }
+
+        private class OtherSignal
+        {
+        }
+        
+        private List<Subscription> GetSubscriptionsForTest<TSignal>(SignalBus bus)
+        {
+            var field = typeof(SignalBus).GetField("_subscriptions", 
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            
+            if (field == null)
+                throw new InvalidOperationException("Field '_subscriptions' not found");
+            
+            var subscriptionsDict = (Dictionary<Type, List<Subscription>>)field.GetValue(bus);
+            
+            if (subscriptionsDict.TryGetValue(typeof(TSignal), out var subscriptions))
+            {
+                return subscriptions;
+            }
+            
+            return new List<Subscription>();
         }
     }
 }
