@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 
 namespace Pragma.SignalBus
 {
@@ -113,7 +112,7 @@ namespace Pragma.SignalBus
                     }
                     else
                     {
-                        SortSubscriptions(subscriptions);
+                        SubscriptionTopologicalSorter.Sort(subscriptions);
                     }
                 }
             }
@@ -125,10 +124,10 @@ namespace Pragma.SignalBus
 
         private void SortSubscriptions(Type type)
         {
-            SortSubscriptions(_subscriptions[type]);
+            SubscriptionTopologicalSorter.Sort(_subscriptions[type]);
         }
 
-        private void SortSubscriptions()
+        public void SortSubscriptions()
         {
             foreach (var type in _subscriptionsToSort)
             {
@@ -136,105 +135,6 @@ namespace Pragma.SignalBus
             }
             
             _subscriptionsToSort.Clear();
-        }
-
-        private void SortSubscriptions(List<Subscription> subscriptions)
-        {
-            if(subscriptions.All(s => s.owner == null))
-            {
-                return;
-            }
-
-            var sortedSubscriptions = new List<Subscription>();
-            var unsortedSubscriptions = new List<Subscription>();
-
-            foreach (var subscription in subscriptions)
-            {
-                if (subscription.owner == null)
-                {
-                    unsortedSubscriptions.Add(subscription);
-                }
-                else
-                {
-                    sortedSubscriptions.Add(subscription);
-                }
-            }
-
-            var dependencies = new Dictionary<Subscription, HashSet<Subscription>>();
-            var reverseDependencies = new Dictionary<Subscription, HashSet<Subscription>>();
-            
-            foreach (var sub in sortedSubscriptions)
-            {
-                dependencies[sub] = new HashSet<Subscription>();
-                reverseDependencies[sub] = new HashSet<Subscription>();
-            }
-            
-            foreach (var current in sortedSubscriptions)
-            {
-                if (current.afterOrder != null)
-                {
-                    foreach (var afterType in current.afterOrder)
-                    {
-                        if (afterType == null)
-                        {
-                            continue;
-                        }
-                        
-                        var predecessors = sortedSubscriptions
-                            .Where(s => s.owner == afterType && s != current);
-
-                        foreach (var pred in predecessors)
-                        {
-                            dependencies[current].Add(pred);
-                            reverseDependencies[pred].Add(current);
-                        }
-                    }
-                }
-                
-                if (current.beforeOrder != null)
-                {
-                    foreach (var beforeType in current.beforeOrder)
-                    {
-                        if (beforeType == null) continue;
-                        
-                        var successors = sortedSubscriptions
-                            .Where(s => s.owner == beforeType && s != current);
-
-                        foreach (var succ in successors)
-                        {
-                            dependencies[succ].Add(current);
-                            reverseDependencies[current].Add(succ);
-                        }
-                    }
-                }
-            }
-            
-            var queue = new Queue<Subscription>(sortedSubscriptions.Where(sub => dependencies[sub].Count == 0));
-            var sorted = new List<Subscription>();
-            
-            while (queue.Count > 0)
-            {
-                var current = queue.Dequeue();
-                sorted.Add(current);
-                
-                foreach (var dependent in reverseDependencies[current])
-                {
-                    dependencies[dependent].Remove(current);
-                    if (dependencies[dependent].Count == 0)
-                    {
-                        queue.Enqueue(dependent);
-                    }
-                }
-            }
-            
-            if (sorted.Count != sortedSubscriptions.Count)
-            {
-                throw new InvalidOperationException("Outer loop in dependent subscriptions. Cannot be ordered.");
-            }
-            
-            subscriptions.Clear();
-            subscriptions.AddRange(sorted);
-            subscriptions.AddRange(unsortedSubscriptions);
         }
 
         public bool Deregister<TSignal>(Action action) where TSignal : class
@@ -344,7 +244,7 @@ namespace Pragma.SignalBus
             
             if(_subscriptionsToSort.Count > 0 && _subscriptionsToSort.Contains(signalType))
             {
-                SortSubscriptions(subscriptions);
+                SubscriptionTopologicalSorter.Sort(subscriptions);
                 _subscriptionsToSort.Remove(signalType);
             }
 
@@ -385,7 +285,7 @@ namespace Pragma.SignalBus
             }
             
             _subscriptionsToRegister.Clear();
-            SortSubscriptions(subscriptions);
+            SubscriptionTopologicalSorter.Sort(subscriptions);
         }
 
         protected virtual object GetDefaultToken()
