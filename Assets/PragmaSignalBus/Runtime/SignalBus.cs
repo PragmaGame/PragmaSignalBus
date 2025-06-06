@@ -297,9 +297,13 @@ namespace Pragma.SignalBus
             {
                 subscriptions.Add(subscription);
             }
+
+            if (_subscriptionsToRegister.Count > 0)
+            {
+                SubscriptionTopologicalSorter.Sort(subscriptions);
+            }
             
             _subscriptionsToRegister.Clear();
-            SubscriptionTopologicalSorter.Sort(subscriptions);
         }
 
         protected virtual object GetDefaultToken()
