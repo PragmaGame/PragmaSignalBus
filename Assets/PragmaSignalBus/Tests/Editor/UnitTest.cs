@@ -32,17 +32,6 @@ namespace UnitTests
         {
             Assert.Fail();
         }
-        
-        private class Signal
-        {
-            public string Name { get; set; }
-            public int Identifier { get; set; }
-        }
-        
-        private class SignalRegister
-        {
-            public SignalBus signalBus;
-        }
 
         [Test]
         public void RegisterAndInvoke()
@@ -204,54 +193,7 @@ namespace UnitTests
         private void PerformanceMethodHandler()
         {
         }
-        
-        public class AllocCounter {
-            private Recorder _rec;
 
-            public AllocCounter() {
-                _rec = Recorder.Get("GC.Alloc");
-
-                // The recorder was created enabled, which means it captured the creation of the
-                // Recorder object itself, etc. Disabling it flushes its data, so that we can retrieve
-                // the sample block count and have it correctly account for these initial allocations.
-                _rec.enabled = false;
-
-#if !UNITY_WEBGL
-                _rec.FilterToCurrentThread();
-#endif
-
-                _rec.enabled = true;
-            }
-
-            public int Stop() {
-                if (_rec == null) {
-                    throw new Exception("AllocCounter already stopped");
-                }
-
-                _rec.enabled = false;
-
-#if !UNITY_WEBGL
-                _rec.CollectFromAllThreads();
-#endif
-
-                var res = _rec.sampleBlockCount;
-                _rec = null;
-                return res;
-            }
-
-            public static int Instrument(Action action) {
-                var counter = new AllocCounter();
-                int allocs;
-                try {
-                    action();
-                } finally {
-                    allocs = counter.Stop();
-                }
-
-                return allocs;
-            }
-        }
-        
         [Test]
         public void OrderTest()
         {
@@ -371,22 +313,17 @@ namespace UnitTests
             Assert.IsTrue(handlerCalled);
         }
         
-        private class Handler1
+        [Test]
+        public void SendFromPool()
         {
+            var eventBus = new SignalBus();
+
+            eventBus.Register<Signal>(TestMethodHandler);
+            eventBus.FromPool<Signal>().Set("Signal", 1).Send();
+
+            Assert.IsTrue(_methodHandlerHit);
         }
 
-        private class Handler2
-        {
-        }
-
-        private class Handler3
-        {
-        }
-
-        private class OtherSignal
-        {
-        }
-        
         private List<Subscription> GetSubscriptionsForTest<TSignal>(SignalBus bus)
         {
             var field = typeof(SignalBus).GetField("_subscriptions", 
@@ -403,6 +340,87 @@ namespace UnitTests
             }
             
             return new List<Subscription>();
+        }
+    }
+
+    public static class SignalExtension
+    {
+        public static SignalWrapper<Signal> Set(this SignalWrapper<Signal> signalWrapper, string name, int identifier)
+        {
+            signalWrapper.Signal.Name = name;
+            signalWrapper.Signal.Identifier = identifier;
+
+            return signalWrapper;
+        }
+    }
+    
+    public class Signal
+    {
+        public string Name { get; set; }
+        public int Identifier { get; set; }
+    }
+        
+    public class SignalRegister
+    {
+        public SignalBus signalBus;
+    }
+    
+    public class Handler1
+    {
+    }
+
+    public class Handler2
+    {
+    }
+
+    public class Handler3
+    {
+    }
+
+    public class AllocCounter {
+        private Recorder _rec;
+
+        public AllocCounter() {
+            _rec = Recorder.Get("GC.Alloc");
+
+            // The recorder was created enabled, which means it captured the creation of the
+            // Recorder object itself, etc. Disabling it flushes its data, so that we can retrieve
+            // the sample block count and have it correctly account for these initial allocations.
+            _rec.enabled = false;
+
+#if !UNITY_WEBGL
+            _rec.FilterToCurrentThread();
+#endif
+
+            _rec.enabled = true;
+        }
+
+        public int Stop() {
+            if (_rec == null) {
+                throw new Exception("AllocCounter already stopped");
+            }
+
+            _rec.enabled = false;
+
+#if !UNITY_WEBGL
+            _rec.CollectFromAllThreads();
+#endif
+
+            var res = _rec.sampleBlockCount;
+            _rec = null;
+            return res;
+        }
+
+        public static int Instrument(Action action) {
+            var counter = new AllocCounter();
+            int allocs;
+            try {
+                action();
+            } finally {
+                allocs = counter.Stop();
+            }
+
+            return allocs;
         }
     }
 }

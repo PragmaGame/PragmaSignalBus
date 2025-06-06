@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using UnityEngine.Scripting;
 
 namespace Pragma.SignalBus
 {
@@ -17,6 +18,7 @@ namespace Pragma.SignalBus
 
         protected Configuration configuration;
 
+        [RequiredMember]
         public SignalBus(Configuration configuration = null)
         {
             this.configuration = configuration ?? new Configuration();
@@ -223,6 +225,18 @@ namespace Pragma.SignalBus
         public void ClearSubscriptions()
         {
             _subscriptions.Clear();
+        }
+        
+        public void SendFromPool<TSignal>(Action<TSignal> setter) where TSignal : class
+        {
+            var signal = SignalPool.Rent<TSignal>();
+            setter.Invoke(signal);
+            Send(typeof(TSignal), signal);
+        }
+        
+        public SignalWrapper<TSignal> FromPool<TSignal>() where TSignal : class
+        {
+            return new SignalWrapper<TSignal>(this, SignalPool.Rent<TSignal>());
         }
 
         public void Send<TSignal>(TSignal signal) where TSignal : class
