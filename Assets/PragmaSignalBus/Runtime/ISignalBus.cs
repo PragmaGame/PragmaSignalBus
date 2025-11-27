@@ -1,8 +1,7 @@
-﻿namespace Pragma.SignalBus
+﻿namespace PragmaSignalBus
 {
-    public interface ISignalBus : ISignalRegistrar, ISignalSender
+    public interface ISignalBus : ISignalSender, ISignalRegistrar
     {
-        public void ClearSubscriptions();
-        public void SortSubscriptions();
+        void ClearSubscriptions();
     }
 }

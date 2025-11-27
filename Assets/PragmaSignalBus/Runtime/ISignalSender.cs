@@ -1,12 +1,13 @@
-﻿using System;
+﻿using System.Threading;
+using Cysharp.Threading.Tasks;
 
-namespace Pragma.SignalBus
+namespace PragmaSignalBus
 {
     public interface ISignalSender
     {
-        public void Send<TSignal>(TSignal signal) where TSignal : class;
-        public void Send<TSignal>() where TSignal : class;
-        public void Send(Type signalType, object signal);
-        public void SendFromPool<TSignal>(Action<TSignal> setter) where TSignal : class;
+        void Send<TSignal>(TSignal signal);
+        void Send<TSignal>();
+        UniTask SendAsync<TSignal>(TSignal signal, CancellationToken token = default, AsyncSendInvocationType asyncSendInvocationType = AsyncSendInvocationType.Sequence);
+        UniTask SendAsync<TSignal>(CancellationToken token = default, AsyncSendInvocationType asyncSendInvocationType = AsyncSendInvocationType.Sequence);
     }
 }

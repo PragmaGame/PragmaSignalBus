@@ -1,19 +1,23 @@
 ﻿using System;
+using System.Threading;
+using Cysharp.Threading.Tasks;
 
-namespace Pragma.SignalBus
+namespace PragmaSignalBus
 {
     public interface ISignalRegistrar
     {
-        public object Register<TSignal>(Action<TSignal> action, Type owner = null, Type[] beforeOrder = null, Type[] afterOrder = null, bool isLazySorted = true)
-            where TSignal : class;
-        public object Register<TSignal>(Action action, Type owner = null, Type[] beforeOrder = null, Type[] afterOrder = null, bool isLazySorted = true)
-            where TSignal : class;
-        public void Register<TSignal>(Action<TSignal> action, object token, Type owner = null, Type[] beforeOrder = null, Type[] afterOrder = null, bool isLazySorted = true)
-            where TSignal : class;
-        public void Register<TSignal>(Action action, object token, Type owner = null, Type[] beforeOrder = null, Type[] afterOrder = null, bool isLazySorted = true)
-            where TSignal : class;
-        public bool Deregister<TSignal>(Action action) where TSignal : class;
-        public bool Deregister<TSignal>(Action<TSignal> action) where TSignal : class;
-        public int Deregister(object token);
+        object Register<TSignal>(Action<TSignal> signal, SortOptions sortOptions = null);
+        object Register<TSignal>(Action signal, SortOptions sortOptions = null);
+        void Register<TSignal>(Action<TSignal> signal, object token, SortOptions sortOptions = null);
+        void Register<TSignal>(Action signal, object token, SortOptions sortOptions = null);
+        void Deregister<TSignal>(Action<TSignal> signal);
+        void Deregister<TSignal>(Action signal);
+        object Register<TSignal>(Func<TSignal, CancellationToken, UniTask> signal, SortOptions sortOptions = null);
+        object Register<TSignal>(Func<CancellationToken, UniTask> signal, SortOptions sortOptions = null);
+        void Register<TSignal>(Func<TSignal, CancellationToken, UniTask> signal, object token, SortOptions sortOptions = null);
+        void Register<TSignal>(Func<CancellationToken, UniTask> signal, object token, SortOptions sortOptions = null);
+        void Deregister<TSignal>(Func<TSignal, CancellationToken, UniTask> signal);
+        void Deregister<TSignal>(Func<CancellationToken, UniTask> signal);
+        void Deregister(object token);
     }
 }
