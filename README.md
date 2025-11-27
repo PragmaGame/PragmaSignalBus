@@ -44,6 +44,15 @@ private void TestMethod()
     signalBus.Deregister(12345);
 }
 
+private async void TestAsyncMethod()
+{
+    ISignalBus signalBus = new SignalBus();
+    
+    signalBus.Register<CustomSignalClass>(OnAsyncSignal);
+    
+    await signalBus.SendAsync(new CustomSignalClass()); // OnAsyncSignal will be invoked
+}
+
 private void OnCustomSignal(CustomSignalClass customSignal)
 {
     Debug.Log("Received customSignal");
@@ -53,6 +62,12 @@ private void OnIntSignal(PayloadEvent<int> intSignal)
 {
     Debug.Log(intEvent.Payload);
 }
+
+private async void OnAsyncSignal(CustomSignalClass customSignal, CancellationToken token)
+{
+    await Task.Delay(1000, token);
+    Debug.Log("Received CustomEvent after 1 second");
+}
 ```
 
 ## Ordering
@@ -60,11 +75,11 @@ private void OnIntSignal(PayloadEvent<int> intSignal)
 You can use order for event handlers.
 
 ```c#
-signalBus.Register<CustomSignalClass>(OnCustomSignal3, order: 3);
-signalBus.Register<CustomSignalClass>(OnCustomSignal, order: 1);
-signalBus.Register<CustomSignalClass>(OnCustomSignal2, order: 2);
+signalBus.Register<CustomSignalClass>(OnCustomSignal3, new SortOptions(typeof(SomeClass3), afterOrder: new[] { typeof(SomeClass2) }));
+signalBus.Register<CustomSignalClass>(OnCustomSignal, new SortOptions(typeof(SomeClass1)));
+signalBus.Register<CustomSignalClass>(OnCustomSignal2, new SortOptions(typeof(SomeClass2), afterOrder: new[] { typeof(SomeClass1) }));
 
-eventBus.Send(new CustomSignalClass()); // OnCustomSignal, OnCustomSignal2, OnCustomSignal3 will be invoked
+signalBus.Send(new CustomSignalClass()); // OnCustomSignal, OnCustomSignal2, OnCustomSignal3 will be invoked
 ```
 
 ## Deregister with token
