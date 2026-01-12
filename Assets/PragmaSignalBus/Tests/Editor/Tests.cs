@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
+using UnityEngine;
 
 namespace PragmaSignalBus.Tests
 {
@@ -526,12 +527,14 @@ namespace PragmaSignalBus.Tests
 
             Func<TestSignal, CancellationToken, UniTask> handler1 = async (e, ct) =>
             {
+                Debug.Log("Handler1 Start : " + callCount);
                 callCount++;
                 await UniTask.Delay(15, cancellationToken: ct);
             };
             
             Func<TestSignal, CancellationToken, UniTask> handler2 = async (e, ct) =>
             {
+                Debug.Log("Handler2 Start : " + callCount);
                 callCount++;
                 await UniTask.Delay(10, cancellationToken: ct);
             };

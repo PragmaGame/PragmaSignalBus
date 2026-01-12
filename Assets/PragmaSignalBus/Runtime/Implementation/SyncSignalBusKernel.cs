@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Data.SqlTypes;
 using UnityEngine.Scripting;
 
 namespace PragmaSignalBus
@@ -6,36 +8,9 @@ namespace PragmaSignalBus
     [Preserve]
     internal class SyncSignalBusKernel : SignalBusKernel<Action<object>>
     {
-        private AlreadySendSignalInfo<Action<object>> _signalInfo;
-
-        private bool _isAlreadySend;
-        private Type _currentSendType;
-        private bool _isDirtySubscriptions;
-
         [RequiredMember]
         public SyncSignalBusKernel(SignalBusConfiguration configuration = null) : base(configuration)
         {
-            _signalInfo = new AlreadySendSignalInfo<Action<object>>();
-        }
-        
-        protected override bool IsAlreadySend(Type type, out AlreadySendSignalInfo<Action<object>> signalInfo)
-        {
-            signalInfo = _signalInfo;
-            return _isAlreadySend && _currentSendType == type;
-        }
-
-        protected override bool IsAnyAlreadySend() => _isAlreadySend;
-
-        protected override void OnAddedSubscriptionsToRegister(AlreadySendSignalInfo<Action<object>> signalInfo, SignalSubscription<Action<object>> subscription)
-        {
-            base.OnAddedSubscriptionsToRegister(signalInfo, subscription);
-            _isDirtySubscriptions = true;
-        }
-
-        protected override void OnAddedSubscriptionsToDeregister(AlreadySendSignalInfo<Action<object>> signalInfo, SignalSubscription<Action<object>> subscription)
-        {
-            base.OnAddedSubscriptionsToDeregister(signalInfo, subscription);
-            _isDirtySubscriptions = true;
         }
 
         public object Register<TSignal>(Action<TSignal> signal, SortOptions sortOptions = null)
@@ -91,10 +66,10 @@ namespace PragmaSignalBus
 
         public void Send<TSignal>()
         {
-            Send(typeof(TSignal), null);
+            Send<TSignal>(typeof(TSignal), default);
         }
 
-        private void Send(Type signalType, object signal)
+        public void Send<TSignal>(Type signalType, TSignal signal)
         {
             if (!subscriptions.TryGetValue(signalType, out var value))
             {
@@ -102,23 +77,36 @@ namespace PragmaSignalBus
                 return;
             }
 
-            _isAlreadySend = true;
-            _currentSendType = signalType;
+            var buffer = RentBuffer(value);
+            
+            Send(signal, value);
 
-            var cachedCount = value.Count;
+            ReleaseBuffer(buffer);
+        }
+
+        public void SendUnsafe<TSignal>(Type signalType, TSignal signal)
+        {
+            if (!subscriptions.TryGetValue(signalType, out var value))
+            {
+                TryThrowException($"Dont find Subscription. Signal Type : {signalType}");
+                return;
+            }
+            
+            Send(signal, value);
+        }
+        
+        private void Send<TSignal>(TSignal signal, List<SignalSubscription<Action<object>>> subscriptions)
+        {
+            var cachedCount = subscriptions.Count;
 
             for (var i = 0; i < cachedCount; i++)
             {
-                value[i].Action.Invoke(signal);
-            }
-
-            _isAlreadySend = false;
-
-            if (_isDirtySubscriptions)
-            {
-                RefreshSubscriptions(_currentSendType, _signalInfo);
-
-                _isDirtySubscriptions = false;
+                if (subscriptions[i].Handler is not Action<TSignal> typedHandler)
+                {
+                    return;
+                }
+                
+                typedHandler.Invoke(signal);
             }
         }
     }

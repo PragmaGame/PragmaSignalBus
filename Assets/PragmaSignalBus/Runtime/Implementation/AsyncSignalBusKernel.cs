@@ -9,40 +9,10 @@ namespace PragmaSignalBus
     [Preserve]
     internal class AsyncSignalBusKernel : SignalBusKernel<Func<object, CancellationToken, UniTask>>
     {
-        private readonly Dictionary<Type, AlreadySendSignalInfo<Func<object, CancellationToken, UniTask>>> _alreadySendSignals;
-        private readonly Stack<AlreadySendSignalInfo<Func<object, CancellationToken, UniTask>>> _poolSendSignals;
-
         public AsyncSignalBusKernel(SignalBusConfiguration configuration = null) : base(configuration)
         {
-            _alreadySendSignals = new Dictionary<Type, AlreadySendSignalInfo<Func<object, CancellationToken, UniTask>>>();
-            _poolSendSignals = new Stack<AlreadySendSignalInfo<Func<object, CancellationToken, UniTask>>>();
-        }
-        
-        private AlreadySendSignalInfo<Func<object, CancellationToken, UniTask>> GetSignalInfo()
-        {
-            if (_poolSendSignals.Count > 0)
-            {
-                return _poolSendSignals.Pop();
-            }
-
-            return new AlreadySendSignalInfo<Func<object, CancellationToken, UniTask>>();
         }
 
-        private void ReleaseSignalInfo(AlreadySendSignalInfo<Func<object, CancellationToken, UniTask>> eventInfo)
-        {
-            _poolSendSignals.Push(eventInfo);
-        }
-
-        protected override bool IsAnyAlreadySend()
-        {
-            return _alreadySendSignals.Count > 0;
-        }
-
-        protected override bool IsAlreadySend(Type type, out AlreadySendSignalInfo<Func<object, CancellationToken, UniTask>> signalInfo)
-        {
-            return _alreadySendSignals.TryGetValue(type, out signalInfo);
-        }
-        
         public object Register<TSignal>(Func<TSignal, CancellationToken, UniTask> signal, SortOptions sortOptions = null)
         {
             var extraToken = GetToken();
@@ -91,31 +61,23 @@ namespace PragmaSignalBus
 
         public UniTask Send<TSignal>(TSignal signal, CancellationToken token = default, AsyncSendInvocationType asyncSendInvocationType = AsyncSendInvocationType.Sequence)
         {
-            return Send(typeof(TSignal), signal, token, asyncSendInvocationType);
+            return Send(typeof(TSignal), true, signal, token, asyncSendInvocationType);
         }
 
         public UniTask Send<TSignal>(CancellationToken token = default, AsyncSendInvocationType asyncSendInvocationType = AsyncSendInvocationType.Sequence)
         {
-            return Send(typeof(TSignal), null, token, asyncSendInvocationType);
+            return Send<TSignal>(typeof(TSignal), false, default, token, asyncSendInvocationType);
         }
         
-        private async UniTask Send(Type signalType, object signal, CancellationToken token, AsyncSendInvocationType asyncSendInvocationType = AsyncSendInvocationType.Sequence)
+        public async UniTask Send<TSignal>(Type signalType, bool isHasValue, TSignal signal, CancellationToken token, AsyncSendInvocationType asyncSendInvocationType = AsyncSendInvocationType.Sequence)
         {
-            if (_alreadySendSignals.ContainsKey(signalType))
-            {
-                TryThrowException($"Recursion detected for signal type: {signalType}");
-                return;
-            }
-            
             if (!subscriptions.TryGetValue(signalType, out var signalSubscriptions))
             {
                 TryThrowException($"Dont find Subscription. Signal Type : {signalType}");
                 return;
             }
 
-            var alreadySendSignalInfo = GetSignalInfo();
-            _alreadySendSignals.Add(signalType, alreadySendSignalInfo);
-            
+            var buffer = RentBuffer(signalSubscriptions);
             var cachedCount = signalSubscriptions.Count;
 
             try
@@ -126,7 +88,12 @@ namespace PragmaSignalBus
                     {
                         for (var i = 0; i < cachedCount; i++)
                         {
-                            await signalSubscriptions[i].Action.Invoke(signal, token);
+                            var subscription = buffer[i];
+                
+                            if (subscription.Handler is Func<TSignal, CancellationToken, UniTask> typed)
+                            {
+                                await typed.Invoke(signal, token);
+                            }
                         }
 
                         break;
@@ -134,8 +101,15 @@ namespace PragmaSignalBus
                     case AsyncSendInvocationType.Parallel:
                     {
                         await UniTask.WhenAll(signalSubscriptions.Select(subscription =>
-                            subscription.Action(signal, token)));
+                        {
+                            if (subscription.Handler is Func<TSignal, CancellationToken, UniTask> typed)
+                            {
+                                return typed(signal, token);
+                            }
 
+                            return UniTask.CompletedTask;
+                        }));
+                        
                         break;
                     }
                     default:
@@ -147,13 +121,7 @@ namespace PragmaSignalBus
             }
             finally
             {
-                if (alreadySendSignalInfo.IsDirtySubscriptions)
-                {
-                    RefreshSubscriptions(signalType, alreadySendSignalInfo);
-                }
-            
-                _alreadySendSignals.Remove(signalType);
-                ReleaseSignalInfo(alreadySendSignalInfo);
+                ReleaseBuffer(buffer);
             }
         }
     }

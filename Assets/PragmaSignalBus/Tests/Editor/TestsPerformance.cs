@@ -47,6 +47,27 @@ namespace PragmaSignalBus.Tests
 
             Console.WriteLine($"[DEBUG] NaiveSendPerformanceTest took {sw.ElapsedMilliseconds}ms");
         }
+        
+        [Test]
+        public void NaiveSendUnsafeEmptyPerformanceTest()
+        {
+            var signalBus = new SignalBus();
+            signalBus.Register<TestSignal>(CustomTestMethodHandlerEmpty);
+
+            var sw = Stopwatch.StartNew();
+            for (int i = 0; i < 1000000; i++)
+            {
+                signalBus.SendUnsafe<TestSignal>();
+            }
+
+            sw.Stop();
+
+            UnityEngine.Debug.Log($"Finished Unsafe in {sw.ElapsedMilliseconds}ms");
+            Assert.IsTrue(sw.Elapsed < TimeSpan.FromSeconds(1),
+                $"NaiveSendPerformanceTest took {sw.ElapsedMilliseconds}ms");
+
+            Console.WriteLine($"[DEBUG] NaiveSendPerformanceTest took {sw.ElapsedMilliseconds}ms");
+        }
 
         private void CustomTestMethodHandler(TestSignal testSignal)
         {

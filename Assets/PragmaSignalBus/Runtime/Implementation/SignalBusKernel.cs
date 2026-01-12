@@ -5,55 +5,76 @@ using UnityEngine.Scripting;
 namespace PragmaSignalBus
 {
     [Preserve]
-    internal abstract class SignalBusKernel<TSignal>
+    internal abstract class SignalBusKernel<TSignalHandler>
     {
-        protected readonly Dictionary<Type, List<SignalSubscription<TSignal>>> subscriptions;
+        protected readonly Dictionary<Type, List<SignalSubscription<TSignalHandler>>> subscriptions;
         protected readonly SignalBusConfiguration configuration;
+        protected readonly Stack<List<SignalSubscription<TSignalHandler>>> poolBuffers;
 
         protected SignalBusKernel(SignalBusConfiguration configuration)
         {
             this.configuration = configuration ?? new SignalBusConfiguration();
 
-            subscriptions = new Dictionary<Type, List<SignalSubscription<TSignal>>>();
+            subscriptions = new Dictionary<Type, List<SignalSubscription<TSignalHandler>>>();
+            poolBuffers = new Stack<List<SignalSubscription<TSignalHandler>>>();
         }
         
-        protected abstract bool IsAlreadySend(Type type, out AlreadySendSignalInfo<TSignal> signalInfo);
-        protected abstract bool IsAnyAlreadySend();
+        protected List<SignalSubscription<TSignalHandler>> RentBuffer(List<SignalSubscription<TSignalHandler>> source)
+        {
+            List<SignalSubscription<TSignalHandler>> buffer;
+
+            var sourceCount = source.Count;
+            
+            if (poolBuffers.Count > 0)
+            {
+                buffer = poolBuffers.Pop();
+            }
+            else
+            {
+                buffer = new List<SignalSubscription<TSignalHandler>>(sourceCount);
+            }
+
+            for (var i = 0; i < sourceCount; i++)
+            {
+                buffer.Add(source[i]);
+            }
+
+            return buffer;
+        }
+
+        protected void ReleaseBuffer(List<SignalSubscription<TSignalHandler>> value)
+        {
+            value.Clear();
+            poolBuffers.Push(value);
+        }
 
         protected virtual object GetToken()
         {
             return Guid.NewGuid();
         }
 
-        protected void Register(Type signalType, TSignal signal, object token, SortOptions sortOptions = null, object extraToken = null)
+        protected void Register(Type signalType, TSignalHandler signal, object token, SortOptions sortOptions = null, object extraToken = null)
         {
-            var subscription = new SignalSubscription<TSignal>(signal, token, extraToken, sortOptions);
+            var subscription = new SignalSubscription<TSignalHandler>(signal, token, extraToken, sortOptions);
 
             if (this.subscriptions.TryGetValue(signalType, out var subscriptions))
             {
-                if (IsAlreadySend(signalType, out var eventInfo))
-                {
-                    OnAddedSubscriptionsToRegister(eventInfo, subscription);
-                }
-                else
-                {
-                    subscriptions.Add(subscription);
+                subscriptions.Add(subscription);
 
-                    if (sortOptions == null)
-                    {
-                        return;
-                    }
-
-                    SubscriptionTopologicalSorter<TSignal>.Sort(subscriptions, false);
+                if (sortOptions == null)
+                {
+                    return;
                 }
+
+                SubscriptionTopologicalSorter<TSignalHandler>.Sort(subscriptions, false);
             }
             else
             {
-                this.subscriptions.Add(signalType, new List<SignalSubscription<TSignal>>() { subscription });
+                this.subscriptions.Add(signalType, new List<SignalSubscription<TSignalHandler>>() { subscription });
             }
         }
         
-        protected void Deregister(Type signalType, object @event)
+        protected void Deregister(Type signalType, object handler)
         {
             if (!this.subscriptions.TryGetValue(signalType, out var subscriptions))
             {
@@ -62,7 +83,7 @@ namespace PragmaSignalBus
                 return;
             }
 
-            var subscriptionToRemove = subscriptions.FindIndex(subscription => subscription.Token.GetHashCode() == @event.GetHashCode());
+            var subscriptionToRemove = subscriptions.FindIndex(subscription => subscription.Token.GetHashCode() == handler.GetHashCode());
 
             if (subscriptionToRemove == -1)
             {
@@ -70,94 +91,17 @@ namespace PragmaSignalBus
                 return;
             }
 
-            if (IsAlreadySend(signalType, out var eventInfo))
-            {
-                OnAddedSubscriptionsToDeregister(eventInfo, subscriptions[subscriptionToRemove]);
-            }
-            else
-            {
-                subscriptions.RemoveAt(subscriptionToRemove);
-            }
-        }
-        
-        protected virtual void OnAddedSubscriptionsToDeregister(AlreadySendSignalInfo<TSignal> signalInfo, SignalSubscription<TSignal> subscription)
-        {
-            signalInfo.SubscriptionsToDeregister.Add(subscription);
+            subscriptions.RemoveAt(subscriptionToRemove);
         }
 
-        protected virtual void OnAddedSubscriptionsToRegister(AlreadySendSignalInfo<TSignal> signalInfo, SignalSubscription<TSignal> subscription)
-        {
-            signalInfo.SubscriptionsToRegister.Add(subscription);
-        }
-
-        protected void RefreshSubscriptions(Type type, AlreadySendSignalInfo<TSignal> signalInfo)
-        {
-            var eventSubscriptions = subscriptions[type];
-            var isNeedSort = false;
-
-            foreach (var subscription in signalInfo.SubscriptionsToDeregister)
-            {
-                eventSubscriptions.Remove(subscription);
-            }
-            
-            signalInfo.SubscriptionsToDeregister.Clear();
-
-            foreach (var subscription in signalInfo.SubscriptionsToRegister)
-            {
-                eventSubscriptions.Add(subscription);
-                
-                if (subscription.SortOptions != null)
-                {
-                    isNeedSort = true;
-                }
-            }
-
-            if (isNeedSort)
-            {
-                SubscriptionTopologicalSorter<TSignal>.Sort(eventSubscriptions, false);
-            }
-            
-            signalInfo.SubscriptionsToRegister.Clear();
-        }
-        
         public void Deregister(object token)
         {
             var tokenHash = token.GetHashCode();
             var removeCount = 0;
 
-            if (IsAnyAlreadySend())
+            foreach (var subscriptions in subscriptions.Values)
             {
-                foreach (var key in subscriptions.Keys)
-                {
-                    var subscriptions = this.subscriptions[key];
-                    var isCurrentPublish = IsAlreadySend(key, out var eventInfo);
-
-                    for (var i = 0; i < subscriptions.Count; i++)
-                    {
-                        if (subscriptions[i].ExtraToken.GetHashCode() != tokenHash)
-                        {
-                            continue;
-                        }
-
-                        removeCount++;
-
-                        if (isCurrentPublish)
-                        {
-                            OnAddedSubscriptionsToDeregister(eventInfo, subscriptions[i]);
-                        }
-                        else
-                        {
-                            subscriptions.RemoveAt(i);
-                        }
-                    }
-                }
-            }
-            else
-            {
-                foreach (var subscriptions in subscriptions.Values)
-                {
-                    removeCount += subscriptions.RemoveAll(subscription => subscription.ExtraToken.GetHashCode() == tokenHash);
-                }
+                removeCount += subscriptions.RemoveAll(subscription => subscription.ExtraToken.GetHashCode() == tokenHash);
             }
 
             if (removeCount == 0)

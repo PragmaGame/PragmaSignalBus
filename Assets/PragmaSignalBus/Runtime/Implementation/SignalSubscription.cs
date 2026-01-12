@@ -3,20 +3,20 @@
 namespace PragmaSignalBus
 {
     [Preserve]
-    public class SignalSubscription<TAction> : ISignalSubscription
+    public class SignalSubscription<TSignalHandler> : ISignalSubscription
     {
-        public TAction Action { get; }
+        public TSignalHandler Handler { get; }
         public object Token { get; }
         public object ExtraToken { get; }
         public SortOptions SortOptions { get; }
 
         [RequiredMember]
-        public SignalSubscription(TAction action,
+        public SignalSubscription(TSignalHandler handler,
                                  object token,
                                  object extraToken = null,
                                  SortOptions sortOptions = null)
         {
-            Action = action;
+            Handler = handler;
             Token = token;
             ExtraToken = extraToken;
             SortOptions = sortOptions;

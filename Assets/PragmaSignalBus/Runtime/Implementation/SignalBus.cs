@@ -24,6 +24,11 @@ namespace PragmaSignalBus
         {
             _syncKernel.Send<TSignal>();
         }
+        
+        public void SendUnsafe<TSignal>()
+        {
+            _syncKernel.SendUnsafe<TSignal>(typeof(TSignal), default);
+        }
 
         public UniTask SendAsync<TSignal>(TSignal signal, CancellationToken token = default,
             AsyncSendInvocationType asyncSendInvocationType = AsyncSendInvocationType.Sequence)
