@@ -6,33 +6,33 @@ using UnityEngine.Scripting;
 namespace PragmaSignalBus
 {
     [Preserve]
-    internal abstract class SignalBusKernel<TSignalHandler>
+    internal abstract class SignalBusKernel
     {
-        protected readonly Dictionary<Type, List<SignalSubscription<TSignalHandler>>> subscriptions;
+        protected readonly Dictionary<Type, List<SignalSubscription>> subscriptionsMap;
         protected readonly SignalBusConfiguration configuration;
-        protected readonly Stack<List<SignalSubscription<TSignalHandler>>> poolBuffers;
+        protected readonly Stack<List<SignalSubscription>> poolBuffers;
 
         protected SignalBusKernel(SignalBusConfiguration configuration)
         {
             this.configuration = configuration ?? new SignalBusConfiguration();
 
-            subscriptions = new Dictionary<Type, List<SignalSubscription<TSignalHandler>>>();
-            poolBuffers = new Stack<List<SignalSubscription<TSignalHandler>>>();
+            subscriptionsMap = new Dictionary<Type, List<SignalSubscription>>();
+            poolBuffers = new Stack<List<SignalSubscription>>();
         }
-        
-        protected List<SignalSubscription<TSignalHandler>> RentBuffer(List<SignalSubscription<TSignalHandler>> source)
+
+        protected List<SignalSubscription> RentBuffer(List<SignalSubscription> source)
         {
-            List<SignalSubscription<TSignalHandler>> buffer;
+            List<SignalSubscription> buffer;
 
             var sourceCount = source.Count;
-            
+
             if (poolBuffers.Count > 0)
             {
                 buffer = poolBuffers.Pop();
             }
             else
             {
-                buffer = new List<SignalSubscription<TSignalHandler>>(sourceCount);
+                buffer = new List<SignalSubscription>(sourceCount);
             }
 
             for (var i = 0; i < sourceCount; i++)
@@ -43,7 +43,7 @@ namespace PragmaSignalBus
             return buffer;
         }
 
-        protected void ReleaseBuffer(List<SignalSubscription<TSignalHandler>> value)
+        protected void ReleaseBuffer(List<SignalSubscription> value)
         {
             value.Clear();
             poolBuffers.Push(value);
@@ -54,11 +54,11 @@ namespace PragmaSignalBus
             return configuration.TokenGenerator.Invoke();
         }
 
-        protected void Register(Type signalType, TSignalHandler handler, Delegate sourceDelegate, SortOptions sortOptions = null, object token = null)
+        protected void Register(Type signalType, Delegate sourceDelegate, SortOptions sortOptions = null, object token = null)
         {
-            var subscription = new SignalSubscription<TSignalHandler>(handler, sourceDelegate, token, sortOptions);
+            var subscription = new SignalSubscription(sourceDelegate, token, sortOptions);
 
-            if (this.subscriptions.TryGetValue(signalType, out var subscriptions))
+            if (subscriptionsMap.TryGetValue(signalType, out var subscriptions))
             {
                 subscriptions.Add(subscription);
 
@@ -67,23 +67,22 @@ namespace PragmaSignalBus
                     return;
                 }
 
-                SubscriptionTopologicalSorter<TSignalHandler>.Sort(subscriptions, false);
+                SubscriptionTopologicalSorter.Sort(subscriptions, false);
             }
             else
             {
-                this.subscriptions.Add(signalType, new List<SignalSubscription<TSignalHandler>>() { subscription });
+                subscriptionsMap.Add(signalType, new List<SignalSubscription>() { subscription });
             }
         }
-        
+
         protected void Deregister(Type signalType, Delegate sourceDelegate)
         {
-            if (!this.subscriptions.TryGetValue(signalType, out var invocationList))
+            if(!TryGetSubscriptions(signalType, out var subscriptions))
             {
-                configuration.Logger?.Invoke(LogType.Log, $"Don't find SignalType. SignalType : {signalType}");
                 return;
             }
 
-            var subscriptionToRemove = invocationList.FindIndex(subscription => subscription.SourceDelegate == sourceDelegate);
+            var subscriptionToRemove = subscriptions.FindIndex(subscription => subscription.SourceDelegate == sourceDelegate);
 
             if (subscriptionToRemove == -1)
             {
@@ -91,7 +90,7 @@ namespace PragmaSignalBus
                 return;
             }
 
-            invocationList.RemoveAt(subscriptionToRemove);
+            subscriptions.RemoveAt(subscriptionToRemove);
         }
 
         public int Deregister(object token)
@@ -99,22 +98,34 @@ namespace PragmaSignalBus
             var tokenHash = token.GetHashCode();
             var removeCount = 0;
 
-            foreach (var invocationList in subscriptions.Values)
+            foreach (var subscriptions in subscriptionsMap.Values)
             {
-                removeCount += invocationList.RemoveAll(subscription => subscription.Token.GetHashCode() == tokenHash);
+                removeCount += subscriptions.RemoveAll(subscription => subscription.Token.GetHashCode() == tokenHash);
             }
 
             if (removeCount == 0)
             {
                 configuration.Logger?.Invoke(LogType.Log, $"Don't find Subscription. Token : {token}");
             }
-            
+
             return removeCount;
+        }
+        
+        protected bool TryGetSubscriptions(Type signalType, out List<SignalSubscription> subscriptions)
+        {
+            if (subscriptionsMap.TryGetValue(signalType, out subscriptions))
+            {
+                return true;
+            }
+            
+            configuration.Logger?.Invoke(LogType.Log, $"Don't find Subscription. Signal Type : {signalType}");
+            return false;
+
         }
         
         public void ClearSubscriptions()
         {
-            subscriptions.Clear();
+            subscriptionsMap.Clear();
         }
     }
 }

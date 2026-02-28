@@ -4,18 +4,18 @@ using System.Linq;
 
 namespace PragmaSignalBus
 {
-    internal static class SubscriptionTopologicalSorter<TAction>
+    internal static class SubscriptionTopologicalSorter
     {
-        private static readonly List<SignalSubscription<TAction>> _sortedSubscriptionsCache = new();
-        private static readonly List<SignalSubscription<TAction>> _unsortedSubscriptionsCache = new();
-        private static readonly List<SignalSubscription<TAction>> _sortedResultCache = new();
-        private static readonly Queue<SignalSubscription<TAction>> _queueCache = new();
+        private static readonly List<SignalSubscription> _sortedSubscriptionsCache = new();
+        private static readonly List<SignalSubscription> _unsortedSubscriptionsCache = new();
+        private static readonly List<SignalSubscription> _sortedResultCache = new();
+        private static readonly Queue<SignalSubscription> _queueCache = new();
 
-        private static readonly Stack<HashSet<SignalSubscription<TAction>>> _hashSetPool = new();
-        private static readonly Dictionary<SignalSubscription<TAction>, HashSet<SignalSubscription<TAction>>> _dependenciesCache = new();
-        private static readonly Dictionary<SignalSubscription<TAction>, HashSet<SignalSubscription<TAction>>> _reverseDependenciesCache = new();
+        private static readonly Stack<HashSet<SignalSubscription>> _hashSetPool = new();
+        private static readonly Dictionary<SignalSubscription, HashSet<SignalSubscription>> _dependenciesCache = new();
+        private static readonly Dictionary<SignalSubscription, HashSet<SignalSubscription>> _reverseDependenciesCache = new();
 
-        public static void Sort(List<SignalSubscription<TAction>> subscriptions, bool checkSortOptions = true)
+        public static void Sort(List<SignalSubscription> subscriptions, bool checkSortOptions = true)
         {
             try
             {
@@ -87,7 +87,7 @@ namespace PragmaSignalBus
             _reverseDependenciesCache.Clear();
         }
 
-        private static void ProcessAfterOrder(SignalSubscription<TAction> current)
+        private static void ProcessAfterOrder(SignalSubscription current)
         {
             if (current.SortOptions.AfterOrder == null)
             {
@@ -112,7 +112,7 @@ namespace PragmaSignalBus
             }
         }
 
-        private static void ProcessBeforeOrder(SignalSubscription<TAction> current)
+        private static void ProcessBeforeOrder(SignalSubscription current)
         {
             if (current.SortOptions.BeforeOrder == null)
             {
@@ -163,9 +163,9 @@ namespace PragmaSignalBus
             }
         }
 
-        private static HashSet<SignalSubscription<TAction>> GetHashSetFromPool()
+        private static HashSet<SignalSubscription> GetHashSetFromPool()
         {
-            return _hashSetPool.Count > 0 ? _hashSetPool.Pop() : new HashSet<SignalSubscription<TAction>>();
+            return _hashSetPool.Count > 0 ? _hashSetPool.Pop() : new HashSet<SignalSubscription>();
         }
     }
 }

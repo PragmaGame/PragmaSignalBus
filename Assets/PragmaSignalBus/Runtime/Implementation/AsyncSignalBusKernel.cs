@@ -8,15 +8,15 @@ using UnityEngine.Scripting;
 namespace PragmaSignalBus
 {
     [Preserve]
-    internal class AsyncSignalBusKernel : SignalBusKernel<Func<object, CancellationToken, UniTask>>
+    internal class AsyncSignalBusKernel : SignalBusKernel
     {
         private readonly Stack<List<UniTask>> _taskListPool;
-        
+
         public AsyncSignalBusKernel(SignalBusConfiguration configuration = null) : base(configuration)
         {
             _taskListPool = new Stack<List<UniTask>>();
         }
-        
+
         private List<UniTask> RentTaskBuffer(int size)
         {
             if (_taskListPool.Count > 0)
@@ -36,39 +36,27 @@ namespace PragmaSignalBus
         public object Register<TSignal>(Func<TSignal, CancellationToken, UniTask> signal, SortOptions sortOptions = null)
         {
             var extraToken = GetToken();
-
-            Register(signal, extraToken, sortOptions);
-
+            Register<TSignal>(signal, extraToken, sortOptions);
             return extraToken;
         }
 
         public object Register<TSignal>(Func<CancellationToken, UniTask> signal, SortOptions sortOptions = null)
         {
             var extraToken = GetToken();
-
             Register<TSignal>(signal, extraToken, sortOptions);
-
             return extraToken;
         }
 
         public void Register<TSignal>(Func<TSignal, CancellationToken, UniTask> signal, object token, SortOptions sortOptions = null)
         {
-            Register(typeof(TSignal), WrapperSignal, signal, sortOptions, token);
-
-            return;
-
-            UniTask WrapperSignal(object args, CancellationToken ct) => signal((TSignal)args, ct);
+            Register(typeof(TSignal), signal, sortOptions, token);
         }
 
         public void Register<TSignal>(Func<CancellationToken, UniTask> signal, object token, SortOptions sortOptions = null)
         {
-            Register(typeof(TSignal), WrapperAction, signal, sortOptions, token);
-
-            return;
-
-            UniTask WrapperAction(object _, CancellationToken ct) => signal(ct);
+            Register(typeof(TSignal), signal, sortOptions, token);
         }
-        
+
         public void Deregister<TSignal>(Func<CancellationToken, UniTask> signal)
         {
             Deregister(typeof(TSignal), signal);
@@ -88,16 +76,15 @@ namespace PragmaSignalBus
         {
             return Send<TSignal>(typeof(TSignal), default, token, asyncSendInvocationType);
         }
-        
+
         public async UniTask Send<TSignal>(Type signalType, TSignal signal, CancellationToken token, AsyncSendInvocationType asyncSendInvocationType = AsyncSendInvocationType.Sequence)
         {
-            if (!subscriptions.TryGetValue(signalType, out var signalSubscriptions))
+            if(!TryGetSubscriptions(signalType, out var subscriptions))
             {
-                configuration.Logger?.Invoke(LogType.Log, $"Dont find Subscription. Signal Type : {signalType}");
                 return;
             }
 
-            var buffer = RentBuffer(signalSubscriptions);
+            var buffer = RentBuffer(subscriptions);
 
             try
             {
@@ -105,12 +92,12 @@ namespace PragmaSignalBus
                 {
                     case AsyncSendInvocationType.Sequence:
                     {
-                        await SequenceSend(signalSubscriptions, signal, token);
+                        await SequenceSend(buffer, signal, token);
                         break;
                     }
                     case AsyncSendInvocationType.Parallel:
                     {
-                        await ParallelSend(signalSubscriptions, signal, token);
+                        await ParallelSend(buffer, signal, token);
                         break;
                     }
                     default:
@@ -125,7 +112,7 @@ namespace PragmaSignalBus
                 ReleaseBuffer(buffer);
             }
         }
-        
+
         public UniTask SendAbstract(object signal, CancellationToken token, AsyncSendInvocationType asyncSendInvocationType = AsyncSendInvocationType.Sequence)
         {
             if (signal == null)
@@ -133,42 +120,83 @@ namespace PragmaSignalBus
                 configuration.Logger?.Invoke(LogType.Log, $"SendAbstract : Signal is null");
                 return UniTask.CompletedTask;
             }
-            
+
             return Send(signal.GetType(), signal, token, asyncSendInvocationType);
         }
-        
-        private async UniTask SequenceSend<TEvent>(List<SignalSubscription<Func<object, CancellationToken, UniTask>>> publishList, TEvent eventData, CancellationToken token)
+
+        private async UniTask SequenceSend<TSignal>(List<SignalSubscription> subscriptions, TSignal signal, CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
-            
-            foreach (var subscription in publishList)
+
+            foreach (var subscription in subscriptions)
             {
                 token.ThrowIfCancellationRequested();
-                
-                if (subscription.SourceDelegate is Func<TEvent, CancellationToken, UniTask> typed)
+
+                switch (subscription.SourceDelegate)
                 {
-                    await typed.Invoke(eventData, token);
-                }
-                else
-                {
-                    await subscription.Handler.Invoke(eventData, token);
+                    case Func<TSignal, CancellationToken, UniTask> typed:
+                    {
+                        await typed.Invoke(signal, token);
+                        break;
+                    }
+                    case Func<CancellationToken, UniTask> action:
+                    {
+                        await action.Invoke(token);
+                        break;
+                    }
+                    default:
+                    {
+                        if (subscription.SourceDelegate.DynamicInvoke(signal, token) is UniTask task)
+                        {
+                            configuration.Logger?.Invoke(LogType.Log, $"Dynamic invocation. Signal Type : {typeof(TSignal)}, Delegate Type : {subscription.SourceDelegate.GetType()}");
+                            await task;
+                        }
+                        
+                        break;
+                    }
                 }
             }
         }
 
-        private async UniTask ParallelSend<TEvent>(List<SignalSubscription<Func<object, CancellationToken, UniTask>>> invocationList, TEvent eventData, CancellationToken token)
+        private async UniTask ParallelSend<TSignal>(List<SignalSubscription> subscriptions, TSignal signal, CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
 
-            var tasks = RentTaskBuffer(invocationList.Count);
+            var tasks = RentTaskBuffer(subscriptions.Count);
 
             try
             {
-                foreach (var subscription in invocationList)
+                foreach (var subscription in subscriptions)
                 {
-                    var task = subscription.SourceDelegate is Func<TEvent, CancellationToken, UniTask> typed
-                        ? typed.Invoke(eventData, token)
-                        : subscription.Handler.Invoke(eventData, token);
+                    UniTask task;
+
+                    switch (subscription.SourceDelegate)
+                    {
+                        case Func<TSignal, CancellationToken, UniTask> typed:
+                        {
+                            task = typed.Invoke(signal, token);
+                            break;
+                        }
+                        case Func<CancellationToken, UniTask> action:
+                        {
+                            task = action.Invoke(token);
+                            break;
+                        }
+                        default:
+                        {
+                            if (subscription.SourceDelegate.DynamicInvoke(signal, token) is UniTask t)
+                            {
+                                configuration.Logger?.Invoke(LogType.Log, $"Dynamic invocation. Signal Type : {typeof(TSignal)}, Delegate Type : {subscription.SourceDelegate.GetType()}");
+                                task = t;
+                            }
+                            else
+                            {
+                                continue;
+                            }
+
+                            break;
+                        }
+                    }
 
                     tasks.Add(task);
                 }

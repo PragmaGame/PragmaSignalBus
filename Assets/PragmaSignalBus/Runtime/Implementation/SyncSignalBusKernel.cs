@@ -1,13 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Data.SqlTypes;
 using UnityEngine;
 using UnityEngine.Scripting;
 
 namespace PragmaSignalBus
 {
     [Preserve]
-    internal class SyncSignalBusKernel : SignalBusKernel<Action<object>>
+    internal class SyncSignalBusKernel : SignalBusKernel
     {
         [RequiredMember]
         public SyncSignalBusKernel(SignalBusConfiguration configuration = null) : base(configuration)
@@ -17,37 +16,25 @@ namespace PragmaSignalBus
         public object Register<TSignal>(Action<TSignal> signal, SortOptions sortOptions = null)
         {
             var extraToken = GetToken();
-
             Register(signal, extraToken, sortOptions);
-
             return extraToken;
         }
 
         public object Register<TSignal>(Action signal, SortOptions sortOptions = null)
         {
             var extraToken = GetToken();
-
             Register<TSignal>(signal, extraToken, sortOptions);
-
             return extraToken;
         }
 
         public void Register<TSignal>(Action<TSignal> signal, object token, SortOptions sortOptions = null)
         {
-            Register(typeof(TSignal), WrapperSignal, signal, sortOptions, token);
-
-            return;
-
-            void WrapperSignal(object args) => signal((TSignal)args);
+            Register(typeof(TSignal), signal, sortOptions, token);
         }
 
         public void Register<TSignal>(Action signal, object token, SortOptions sortOptions = null)
         {
-            Register(typeof(TSignal), WrapperAction, signal, sortOptions, token);
-
-            return;
-
-            void WrapperAction(object _) => signal();
+            Register(typeof(TSignal), signal, sortOptions, token);
         }
 
         public void Deregister<TSignal>(Action signal)
@@ -77,23 +64,22 @@ namespace PragmaSignalBus
                 configuration.Logger?.Invoke(LogType.Log, $"Signal is null");
                 return;
             }
-            
+
             Send(signal.GetType(), signal);
         }
 
         public void Send<TSignal>(Type signalType, TSignal signal)
         {
-            if (!subscriptions.TryGetValue(signalType, out var value))
+            if(!TryGetSubscriptions(signalType, out var subscriptions))
             {
-                configuration.Logger?.Invoke(LogType.Log, $"Dont find Subscription. Signal Type : {signalType}");
                 return;
             }
 
-            var buffer = RentBuffer(value);
+            var buffer = RentBuffer(subscriptions);
 
             try
             {
-                Send(signal, value);
+                Send(signal, buffer);
             }
             finally
             {
@@ -104,29 +90,41 @@ namespace PragmaSignalBus
         public void SendUnsafe<TSignal>(TSignal signal)
         {
             var signalType = typeof(TSignal);
-            
-            if (!subscriptions.TryGetValue(signalType, out var value))
+
+            if(!TryGetSubscriptions(signalType, out var subscriptions))
             {
-                configuration.Logger?.Invoke(LogType.Log, $"Dont find Subscription. Signal Type : {signalType}");
                 return;
             }
-            
-            Send(signal, value);
+
+            Send(signal, subscriptions);
         }
-        
-        private void Send<TSignal>(TSignal signal, List<SignalSubscription<Action<object>>> invocationList)
+
+        private void Send<TSignal>(TSignal signal, List<SignalSubscription> subscriptions)
         {
-            var cachedCount = invocationList.Count;
+            var cachedCount = subscriptions.Count;
 
             for (var i = 0; i < cachedCount; i++)
             {
-                if (invocationList[i].SourceDelegate is Action<TSignal> typedDelegate)
+                var sourceDelegate = subscriptions[i].SourceDelegate;
+
+                switch (sourceDelegate)
                 {
-                    typedDelegate.Invoke(signal);
-                }
-                else
-                {
-                    invocationList[i].Handler.Invoke(signal);
+                    case Action<TSignal> argAction:
+                    {
+                        argAction.Invoke(signal);
+                        break;
+                    }
+                    case Action action:
+                    {
+                        action.Invoke();
+                        break;
+                    }
+                    default:
+                    {
+                        configuration?.Logger?.Invoke(LogType.Log, $"Dynamic invocation. Signal Type : {typeof(TSignal)}, Delegate Type : {sourceDelegate.GetType()}");
+                        sourceDelegate?.DynamicInvoke(signal);
+                        break;
+                    }
                 }
             }
         }
