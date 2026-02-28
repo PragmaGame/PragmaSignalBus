@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data.SqlTypes;
+using UnityEngine;
 using UnityEngine.Scripting;
 
 namespace PragmaSignalBus
@@ -69,44 +70,64 @@ namespace PragmaSignalBus
             Send<TSignal>(typeof(TSignal), default);
         }
 
+        public void SendAbstract(object signal)
+        {
+            if (signal == null)
+            {
+                configuration.Logger?.Invoke(LogType.Log, $"Signal is null");
+                return;
+            }
+            
+            Send(signal.GetType(), signal);
+        }
+
         public void Send<TSignal>(Type signalType, TSignal signal)
         {
             if (!subscriptions.TryGetValue(signalType, out var value))
             {
-                TryThrowException($"Dont find Subscription. Signal Type : {signalType}");
+                configuration.Logger?.Invoke(LogType.Log, $"Dont find Subscription. Signal Type : {signalType}");
                 return;
             }
 
             var buffer = RentBuffer(value);
-            
-            Send(signal, value);
 
-            ReleaseBuffer(buffer);
+            try
+            {
+                Send(signal, value);
+            }
+            finally
+            {
+                ReleaseBuffer(buffer);
+            }
         }
 
-        public void SendUnsafe<TSignal>(Type signalType, TSignal signal)
+        public void SendUnsafe<TSignal>(TSignal signal)
         {
+            var signalType = typeof(TSignal);
+            
             if (!subscriptions.TryGetValue(signalType, out var value))
             {
-                TryThrowException($"Dont find Subscription. Signal Type : {signalType}");
+                configuration.Logger?.Invoke(LogType.Log, $"Dont find Subscription. Signal Type : {signalType}");
                 return;
             }
             
             Send(signal, value);
         }
         
-        private void Send<TSignal>(TSignal signal, List<SignalSubscription<Action<object>>> subscriptions)
+        private void Send<TSignal>(TSignal signal, List<SignalSubscription<Action<object>>> invocationList)
         {
-            var cachedCount = subscriptions.Count;
+            var cachedCount = invocationList.Count;
 
             for (var i = 0; i < cachedCount; i++)
             {
-                if (subscriptions[i].Handler is not Action<TSignal> typedHandler)
+                if (invocationList[i].SourceDelegate is Action<TSignal> typedDelegate)
                 {
-                    return;
+                    typedDelegate.Invoke(signal);
                 }
-                
-                typedHandler.Invoke(signal);
+                else
+                {
+                    invocationList[i].Handler.Invoke(signal);
+                }
             }
         }
     }

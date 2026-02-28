@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using UnityEngine;
 using UnityEngine.Scripting;
 
 namespace PragmaSignalBus
@@ -50,12 +51,12 @@ namespace PragmaSignalBus
 
         protected virtual object GetToken()
         {
-            return Guid.NewGuid();
+            return configuration.TokenGenerator.Invoke();
         }
 
-        protected void Register(Type signalType, TSignalHandler signal, object token, SortOptions sortOptions = null, object extraToken = null)
+        protected void Register(Type signalType, TSignalHandler handler, Delegate sourceDelegate, SortOptions sortOptions = null, object token = null)
         {
-            var subscription = new SignalSubscription<TSignalHandler>(signal, token, extraToken, sortOptions);
+            var subscription = new SignalSubscription<TSignalHandler>(handler, sourceDelegate, token, sortOptions);
 
             if (this.subscriptions.TryGetValue(signalType, out var subscriptions))
             {
@@ -74,48 +75,41 @@ namespace PragmaSignalBus
             }
         }
         
-        protected void Deregister(Type signalType, object handler)
+        protected void Deregister(Type signalType, Delegate sourceDelegate)
         {
-            if (!this.subscriptions.TryGetValue(signalType, out var subscriptions))
+            if (!this.subscriptions.TryGetValue(signalType, out var invocationList))
             {
-                TryThrowException($"Don't find SignalType. SignalType : {signalType}");
-
+                configuration.Logger?.Invoke(LogType.Log, $"Don't find SignalType. SignalType : {signalType}");
                 return;
             }
 
-            var subscriptionToRemove = subscriptions.FindIndex(subscription => subscription.Token.GetHashCode() == handler.GetHashCode());
+            var subscriptionToRemove = invocationList.FindIndex(subscription => subscription.SourceDelegate == sourceDelegate);
 
             if (subscriptionToRemove == -1)
             {
-                TryThrowException($"Don't find Subscription. SignalType : {signalType}");
+                configuration.Logger?.Invoke(LogType.Log, $"Don't find Subscription. SignalType : {signalType}");
                 return;
             }
 
-            subscriptions.RemoveAt(subscriptionToRemove);
+            invocationList.RemoveAt(subscriptionToRemove);
         }
 
-        public void Deregister(object token)
+        public int Deregister(object token)
         {
             var tokenHash = token.GetHashCode();
             var removeCount = 0;
 
-            foreach (var subscriptions in subscriptions.Values)
+            foreach (var invocationList in subscriptions.Values)
             {
-                removeCount += subscriptions.RemoveAll(subscription => subscription.ExtraToken.GetHashCode() == tokenHash);
+                removeCount += invocationList.RemoveAll(subscription => subscription.Token.GetHashCode() == tokenHash);
             }
 
             if (removeCount == 0)
             {
-                TryThrowException($"Don't find Subscription. Token : {token}");
+                configuration.Logger?.Invoke(LogType.Log, $"Don't find Subscription. Token : {token}");
             }
-        }
-        
-        protected void TryThrowException(string message)
-        {
-            if (configuration.IsThrowException)
-            {
-                throw new Exception(message);
-            }
+            
+            return removeCount;
         }
         
         public void ClearSubscriptions()

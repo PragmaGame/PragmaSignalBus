@@ -18,6 +18,6 @@ namespace PragmaSignalBus
         void Register<TSignal>(Func<CancellationToken, UniTask> signal, object token, SortOptions sortOptions = null);
         void Deregister<TSignal>(Func<TSignal, CancellationToken, UniTask> signal);
         void Deregister<TSignal>(Func<CancellationToken, UniTask> signal);
-        void Deregister(object token);
+        int Deregister(object token);
     }
 }

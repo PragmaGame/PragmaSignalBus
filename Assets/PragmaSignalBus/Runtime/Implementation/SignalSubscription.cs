@@ -1,4 +1,5 @@
-﻿using UnityEngine.Scripting;
+﻿using System;
+using UnityEngine.Scripting;
 
 namespace PragmaSignalBus
 {
@@ -6,19 +7,19 @@ namespace PragmaSignalBus
     public class SignalSubscription<TSignalHandler> : ISignalSubscription
     {
         public TSignalHandler Handler { get; }
+        public Delegate SourceDelegate { get; }
         public object Token { get; }
-        public object ExtraToken { get; }
         public SortOptions SortOptions { get; }
 
         [RequiredMember]
         public SignalSubscription(TSignalHandler handler,
-                                 object token,
-                                 object extraToken = null,
-                                 SortOptions sortOptions = null)
+                                  Delegate sourceDelegate,
+                                  object token = null,
+                                  SortOptions sortOptions = null)
         {
             Handler = handler;
+            SourceDelegate = sourceDelegate;
             Token = token;
-            ExtraToken = extraToken;
             SortOptions = sortOptions;
         }
     }

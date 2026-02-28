@@ -1,4 +1,5 @@
 ﻿using System;
+using UnityEngine;
 using UnityEngine.Scripting;
 
 namespace PragmaSignalBus
@@ -6,18 +7,15 @@ namespace PragmaSignalBus
     [Serializable, Preserve]
     public class SignalBusConfiguration
     {
-        public bool IsThrowException { get; }
+        public Action<LogType, string> Logger { get; private set; }
+        public Func<object> TokenGenerator { get; private set; }
 
         [RequiredMember]
-        public SignalBusConfiguration()
+        public SignalBusConfiguration(Action<LogType, string> logger = null, Func<object> tokenGenerator = null)
         {
-            IsThrowException = false;
-        }
+            Logger = logger;
 
-        [RequiredMember]
-        public SignalBusConfiguration(bool isThrowException)
-        {
-            IsThrowException = isThrowException;
+            TokenGenerator = tokenGenerator ?? (() => Guid.NewGuid());
         }
     }
 }

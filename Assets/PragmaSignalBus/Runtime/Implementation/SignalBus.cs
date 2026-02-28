@@ -27,7 +27,12 @@ namespace PragmaSignalBus
         
         public void SendUnsafe<TSignal>()
         {
-            _syncKernel.SendUnsafe<TSignal>(typeof(TSignal), default);
+            _syncKernel.SendUnsafe<TSignal>(default);
+        }
+
+        public void SendAbstract(object signal)
+        {
+            _syncKernel.SendAbstract(signal);
         }
 
         public UniTask SendAsync<TSignal>(TSignal signal, CancellationToken token = default,
@@ -40,6 +45,12 @@ namespace PragmaSignalBus
             AsyncSendInvocationType asyncSendInvocationType = AsyncSendInvocationType.Sequence)
         {
             return _asyncKernel.Send<TSignal>(token, asyncSendInvocationType);
+        }
+
+        public UniTask SendAbstractAsync(object signal, CancellationToken token = default,
+            AsyncSendInvocationType asyncSendInvocationType = AsyncSendInvocationType.Sequence)
+        {
+            return _asyncKernel.SendAbstract(signal, token, asyncSendInvocationType);
         }
 
         public object Register<TSignal>(Action<TSignal> signal, SortOptions sortOptions = null)
@@ -102,10 +113,12 @@ namespace PragmaSignalBus
             _asyncKernel.Deregister<TSignal>(signal);
         }
 
-        public void Deregister(object token)
+        public int Deregister(object token)
         {
-            _syncKernel.Deregister(token);
-            _asyncKernel.Deregister(token);
+            var countSync = _syncKernel.Deregister(token);
+            var countAsync = _asyncKernel.Deregister(token);
+            
+            return countAsync + countSync;
         }
 
         public void ClearSubscriptions()
